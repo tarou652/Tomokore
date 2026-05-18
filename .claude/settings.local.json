@@ -7,7 +7,10 @@
       "Bash(npm --version)",
       "Bash(npx nuxi@latest init . --package-manager npm --no-git-init)",
       "Bash(npx nuxi@3.12.0 init . --package-manager npm --no-git-init)",
-      "Bash(npx nuxi@3.12.0 init /tmp/nuxt-temp --package-manager npm --no-git-init)"
+      "Bash(npx nuxi@3.12.0 init /tmp/nuxt-temp --package-manager npm --no-git-init)",
+      "Bash(npm install *)",
+      "Bash(cd /c/code/tomokore/TomodachiHairTrace && ls -la)",
+      "Read(//c/c/code/tomokore/**)"
     ]
   }
 }
