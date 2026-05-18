@@ -12,7 +12,8 @@
       "Bash(cd /c/code/tomokore/TomodachiHairTrace && ls -la)",
       "Read(//c/c/code/tomokore/**)",
       "Bash(Select-String -Path \"c:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\node_modules\\\\@mediapipe\\\\tasks-vision\\\\vision.d.ts\" -Pattern \"ImageSegmenter\")",
-      "Bash(Select-Object -First 30)"
+      "Bash(Select-Object -First 30)",
+      "Bash(Remove-Item \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useHairSegment.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useOpenCV.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useFaceDetect.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useBackgroundRemoval.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useDrawAnalysis.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useHairColor.ts\", \"C:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\app\\\\composables\\\\useHairCanvas.ts\")"
     ]
   }
 }

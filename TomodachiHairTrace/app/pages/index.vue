@@ -1,619 +1,366 @@
 <script setup lang="ts">
-import { CANVAS_SIZE } from "~/composables/useHairCanvas";
-import type { HairMaskResult } from "~/composables/useHairSegment";
-import type { Contour } from "~/composables/useOpenCV";
-import type { FaceBox } from "~/composables/useFaceDetect";
-import { extractHairColors } from "~/composables/useHairColor";
-import type { HairColorGuide } from "~/composables/useHairColor";
-import { analyzeDrawDifficulty } from "~/composables/useDrawAnalysis";
-import type { DrawAnalysis } from "~/composables/useDrawAnalysis";
+import { useImageCrop } from "~/composables/useImageCrop";
+import {
+  extractColorPalette,
+  type PaletteEntry,
+} from "~/composables/useColorPalette";
 
-const {
-  isReady: segmentReady,
-  isProcessing: segmentProcessing,
-  init: initSegment,
-  segment,
-} = useHairSegment();
-const { error: bgRemoveError, removeBackground } = useBackgroundRemoval();
-const {
-  isLoaded: cvLoaded,
-  isLoading: cvLoading,
-  loadError: cvError,
-  load: loadCV,
-  cannyFromMask,
-  findContours,
-  simplifyContours,
-} = useOpenCV();
+const cropCanvasRef = ref<HTMLCanvasElement | null>(null);
+const pixelGridCanvasRef = ref<HTMLCanvasElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-const {
-  drawSource,
-  drawGrid,
-  drawCenterLine,
-  exportPng,
-  drawHairMask,
-  drawContourLines,
-  drawSilhouette,
-  drawSmoothSilhouette,
-} = useHairCanvas(canvasRef);
-
-const silhouetteCanvasRef = ref<HTMLCanvasElement | null>(null);
-const {
-  drawHairMask: drawSilHairMask,
-  drawSmoothSilhouette: drawSilSmoothSilhouette,
-} = useHairCanvas(silhouetteCanvasRef);
-
-const sourceImageUrl = ref<string | null>(null);
 const sourceImg = ref<HTMLImageElement | null>(null);
-const bgRemovedImg = ref<HTMLImageElement | null>(null);
-const enableBgRemoval = ref(false);
+const isDraggingOver = ref(false);
+const targetSize = ref<64 | 128 | 256>(64);
+const resultImageData = ref<ImageData | null>(null);
+const colorPalette = ref<PaletteEntry[]>([]);
+const zoomLevel = ref(4);
+const hoveredPixel = ref<{ x: number; y: number; hex: string } | null>(null);
 
-const showGrid = ref(true);
-const showCenterLine = ref(true);
-const showHairMask = ref(false);
-const showContours = ref(false);
-const showSilhouette = ref(false);
-const showSmoothSilhouette = ref(false);
+const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
+  useImageCrop(cropCanvasRef);
 
-const dpEpsilon = ref(2.0);
-const contourTotalPoints = ref(0);
-
-const currentBox = ref<FaceBox | null>(null);
-
-const hairMaskResult = ref<HairMaskResult | null>(null);
-const rawContours = ref<Contour[] | null>(null);
-const simplifiedContours = ref<Contour[] | null>(null);
-
-const hairColorGuide = ref<HairColorGuide | null>(null);
-const drawAnalysis = ref<DrawAnalysis | null>(null);
-
-const statusMessage = ref("画像をアップロードしてください");
-
-onMounted(async () => {
-  try {
-    await initSegment();
-  } catch {
-    statusMessage.value = "MediaPipe の初期化に失敗しました";
-  }
+// デフォルトズームを解像度に合わせる
+watch(targetSize, (size) => {
+  zoomLevel.value = size === 64 ? 4 : size === 128 ? 2 : 1;
 });
 
-function resetPhase2Cache() {
-  hairMaskResult.value = null;
-  rawContours.value = null;
-  simplifiedContours.value = null;
-  contourTotalPoints.value = 0;
-  bgRemovedImg.value = null;
-  showHairMask.value = false;
-  showContours.value = false;
-  showSilhouette.value = false;
-  showSmoothSilhouette.value = false;
-  hairColorGuide.value = null;
-  drawAnalysis.value = null;
-  const ctx = silhouetteCanvasRef.value?.getContext("2d");
-  if (ctx) ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-}
-
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-    statusMessage.value = "PNG / JPG / WEBP のみ対応しています";
-    return;
-  }
-  resetPhase2Cache();
+function loadImage(file: File) {
+  if (!file.type.startsWith("image/")) return;
   const url = URL.createObjectURL(file);
-  sourceImageUrl.value = url;
   const img = new Image();
   img.onload = () => {
     sourceImg.value = img;
-    processImage(img);
+    resultImageData.value = null;
+    colorPalette.value = [];
+    hoveredPixel.value = null;
+    nextTick(() => setImage(img));
   };
   img.src = url;
 }
 
-function onDrop(event: DragEvent) {
-  event.preventDefault();
-  const file = event.dataTransfer?.files?.[0];
-  if (!file) return;
-  const fakeEvent = { target: { files: [file] } } as unknown as Event;
-  onFileChange(fakeEvent);
+function onFileChange(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) loadImage(file);
+  (e.target as HTMLInputElement).value = "";
 }
 
-function processImage(img: HTMLImageElement) {
-  if (img.naturalWidth * img.naturalHeight > 4_000_000) {
-    statusMessage.value = "画像が大きすぎます (推奨: 4MP 以下)";
-    return;
-  }
-  const box: FaceBox = {
-    x: 0,
-    y: 0,
-    width: img.naturalWidth,
-    height: img.naturalHeight,
-  };
-  currentBox.value = box;
-  drawSource(img, box);
-  if (showGrid.value) drawGrid();
-  if (showCenterLine.value) drawCenterLine();
-  statusMessage.value = "「髪型解析」ボタンを押してください";
+function onDrop(e: DragEvent) {
+  isDraggingOver.value = false;
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0];
+  if (file) loadImage(file);
 }
 
-function redraw() {
-  const img = sourceImg.value;
-  const box = currentBox.value;
-  if (!img || !box) return;
-
-  drawSource(img, box);
-  if (showGrid.value) drawGrid();
-  if (showCenterLine.value) drawCenterLine();
-
-  const mw = hairMaskResult.value?.sourceWidth ?? img.naturalWidth;
-  const mh = hairMaskResult.value?.sourceHeight ?? img.naturalHeight;
-
-  if (showHairMask.value && hairMaskResult.value)
-    drawHairMask(hairMaskResult.value.sourceMask, mw, mh, box);
-  if (showContours.value && rawContours.value)
-    drawContourLines(rawContours.value, mw, mh, box);
-  if (showSilhouette.value && simplifiedContours.value)
-    drawSilhouette(simplifiedContours.value, mw, mh, box);
-  if (showSmoothSilhouette.value && simplifiedContours.value)
-    drawSmoothSilhouette(simplifiedContours.value, mw, mh, box);
+function toHex(r: number, g: number, b: number): string {
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
 }
 
-function redrawSilhouette() {
-  if (!silhouetteCanvasRef.value || !hairMaskResult.value || !currentBox.value)
-    return;
-  const ctx = silhouetteCanvasRef.value.getContext("2d");
-  if (!ctx) return;
-  ctx.fillStyle = "#f5f5f5";
-  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-  const { sourceMask, sourceWidth, sourceHeight } = hairMaskResult.value;
-  drawSilHairMask(
-    sourceMask,
-    sourceWidth,
-    sourceHeight,
-    currentBox.value,
-    "rgba(30, 30, 40, 0.92)",
-  );
-  if (simplifiedContours.value) {
-    drawSilSmoothSilhouette(
-      simplifiedContours.value,
-      sourceWidth,
-      sourceHeight,
-      currentBox.value,
-    );
-  }
-}
+function renderPixelGrid(imageData: ImageData, zoom: number) {
+  const canvas = pixelGridCanvasRef.value;
+  if (!canvas) return;
+  const { width, height, data } = imageData;
+  const showLabels = zoom >= 4;
+  const mLeft = showLabels ? 32 : 0;
+  const mTop = showLabels ? 20 : 0;
 
-async function runPhase2Analysis() {
-  const box = currentBox.value;
-  if (!sourceImg.value || !box) return;
+  canvas.width = width * zoom + mLeft;
+  canvas.height = height * zoom + mTop;
 
-  let workImg = sourceImg.value;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#0f172a";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (enableBgRemoval.value) {
-    statusMessage.value = "背景を除去中...";
-    const removed = await removeBackground(workImg);
-    if (bgRemoveError.value) {
-      statusMessage.value = `背景除去エラー: ${bgRemoveError.value}`;
-      return;
-    }
-    if (removed) {
-      bgRemovedImg.value = removed;
-      workImg = removed;
+  for (let py = 0; py < height; py++) {
+    for (let px = 0; px < width; px++) {
+      const i = (py * width + px) * 4;
+      const a = data[i + 3] ?? 255;
+      if (a < 128) {
+        ctx.fillStyle = (px + py) % 2 === 0 ? "#444" : "#333";
+      } else {
+        ctx.fillStyle = `rgb(${data[i]},${data[i + 1]},${data[i + 2]})`;
+      }
+      ctx.fillRect(mLeft + px * zoom, mTop + py * zoom, zoom, zoom);
     }
   }
 
-  statusMessage.value = "髪領域を抽出中...";
-  const maskResult = await segment(workImg);
-  if (!maskResult) {
-    statusMessage.value = "髪抽出に失敗しました";
-    return;
-  }
-  if (maskResult.hairPixelCount === 0) {
-    statusMessage.value = "髪が検出できませんでした";
-    return;
-  }
-  hairMaskResult.value = maskResult;
-
-  statusMessage.value = "OpenCV を読み込み中...";
-  await loadCV();
-  if (cvError.value) {
-    statusMessage.value = `OpenCV エラー: ${cvError.value}`;
-    return;
-  }
-
-  statusMessage.value = "輪郭を抽出中...";
-  const edges = cannyFromMask(
-    maskResult.sourceMask,
-    maskResult.sourceWidth,
-    maskResult.sourceHeight,
-  );
-  if (!edges) {
-    statusMessage.value = "エッジ検出に失敗しました";
-    return;
+  // グリッド線
+  if (zoom >= 2) {
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.lineWidth = 0.5;
+    for (let xi = 0; xi <= width; xi++) {
+      const px = mLeft + xi * zoom + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(px, mTop);
+      ctx.lineTo(px, mTop + height * zoom);
+      ctx.stroke();
+    }
+    for (let yi = 0; yi <= height; yi++) {
+      const py = mTop + yi * zoom + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(mLeft, py);
+      ctx.lineTo(mLeft + width * zoom, py);
+      ctx.stroke();
+    }
   }
 
-  const contoursResult = findContours(edges.edges, edges.width, edges.height);
-  if (!contoursResult) {
-    statusMessage.value = "輪郭抽出に失敗しました";
-    return;
+  // 座標ラベル
+  if (showLabels) {
+    const step = zoom >= 16 ? 1 : zoom >= 8 ? 2 : 4;
+    ctx.fillStyle = "#64748b";
+    ctx.font = "9px monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let yi = 0; yi < height; yi += step) {
+      ctx.fillText(String(yi), mLeft - 3, mTop + yi * zoom + zoom / 2);
+    }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    for (let xi = 0; xi < width; xi += step) {
+      ctx.fillText(String(xi), mLeft + xi * zoom + zoom / 2, mTop - 2);
+    }
   }
-  rawContours.value = contoursResult.contours;
-  contourTotalPoints.value = contoursResult.totalPoints;
-
-  simplifiedContours.value = simplifyContours(
-    contoursResult.contours,
-    dpEpsilon.value,
-  );
-
-  hairColorGuide.value = extractHairColors(
-    maskResult.sourceMask,
-    maskResult.sourceWidth,
-    maskResult.sourceHeight,
-    workImg,
-  );
-  drawAnalysis.value = analyzeDrawDifficulty(simplifiedContours.value, null);
-
-  statusMessage.value = `解析完了 (輪郭点数: ${contoursResult.totalPoints} / 難易度: ${drawAnalysis.value.grade})`;
-  redraw();
-  redrawSilhouette();
 }
 
-watch(dpEpsilon, (eps) => {
-  if (!rawContours.value) return;
-  simplifiedContours.value = simplifyContours(rawContours.value, eps);
-  contourTotalPoints.value = simplifiedContours.value.reduce(
-    (s, c) => s + c.length,
-    0,
-  );
-  drawAnalysis.value = analyzeDrawDifficulty(simplifiedContours.value, null);
-  redraw();
-  redrawSilhouette();
+function onConvert() {
+  const out = getCroppedCanvas(targetSize.value);
+  if (!out) return;
+  const ctx = out.getContext("2d")!;
+  const imageData = ctx.getImageData(0, 0, targetSize.value, targetSize.value);
+  resultImageData.value = imageData;
+  colorPalette.value = extractColorPalette(imageData);
+  nextTick(() => renderPixelGrid(imageData, zoomLevel.value));
+}
+
+watch(zoomLevel, (z) => {
+  if (resultImageData.value) {
+    nextTick(() => renderPixelGrid(resultImageData.value!, z));
+  }
 });
 
-type BadgeColor =
-  | "success"
-  | "primary"
-  | "warning"
-  | "error"
-  | "neutral"
-  | "secondary"
-  | "info";
-
-function gradeBadgeColor(grade: string): BadgeColor {
-  const map: Record<string, BadgeColor> = {
-    S: "success",
-    A: "primary",
-    B: "warning",
-    C: "error",
-    D: "error",
+function onPixelHover(e: MouseEvent) {
+  const canvas = pixelGridCanvasRef.value;
+  if (!canvas || !resultImageData.value) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const showLabels = zoomLevel.value >= 4;
+  const mLeft = showLabels ? 32 : 0;
+  const mTop = showLabels ? 20 : 0;
+  const pxX = Math.floor((mx - mLeft) / zoomLevel.value);
+  const pxY = Math.floor((my - mTop) / zoomLevel.value);
+  const size = targetSize.value;
+  if (pxX < 0 || pxY < 0 || pxX >= size || pxY >= size) {
+    hoveredPixel.value = null;
+    return;
+  }
+  const { data } = resultImageData.value;
+  const i = (pxY * size + pxX) * 4;
+  hoveredPixel.value = {
+    x: pxX,
+    y: pxY,
+    hex: toHex(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0),
   };
-  return map[grade] ?? "neutral";
 }
 
-function downloadPng() {
-  const dataUrl = exportPng();
-  if (!dataUrl) return;
+async function onCopyHex(hex: string) {
+  await navigator.clipboard.writeText(hex.toUpperCase()).catch(() => {});
+}
+
+function onDownload() {
+  const canvas = pixelGridCanvasRef.value;
+  if (!canvas) return;
   const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = "hair-guide.png";
+  a.href = canvas.toDataURL("image/png");
+  a.download = `pixel-${targetSize.value}x${targetSize.value}.png`;
   a.click();
 }
+
+const zoomOptions = [1, 2, 4, 8, 16] as const;
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-950 text-white flex flex-col">
-    <header
-      class="px-6 py-3 border-b border-gray-800 flex items-center gap-3 flex-wrap"
-    >
-      <span class="text-lg font-bold tracking-wide">Tomodachi Hair Trace</span>
-      <UBadge color="primary" variant="soft">Phase 3</UBadge>
-      <div class="ml-auto flex items-center gap-2 flex-wrap">
-        <UBadge :color="segmentReady ? 'success' : 'warning'" variant="soft">
-          Seg: {{ segmentReady ? "準備完了" : "初期化中..." }}
-        </UBadge>
-        <UBadge :color="cvLoaded ? 'success' : 'neutral'" variant="soft">
-          OpenCV: {{ cvLoaded ? "読込済" : "未読込" }}
-        </UBadge>
-      </div>
+  <div class="min-h-screen bg-slate-950 text-slate-100">
+    <header class="border-b border-slate-800 px-6 py-4">
+      <h1 class="text-lg font-bold tracking-tight">Tomodachi Hair Trace</h1>
+      <p class="text-xs text-slate-500 mt-0.5">キャラ画像をドット絵に変換</p>
     </header>
 
-    <main class="flex flex-1 gap-4 p-4 overflow-hidden">
-      <!-- 左: 元画像 -->
-      <section class="w-64 flex-shrink-0 flex flex-col gap-3">
-        <h2
-          class="text-sm font-semibold text-gray-400 uppercase tracking-wider"
-        >
-          元画像
-        </h2>
-
-        <label
-          class="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 rounded-xl h-40 cursor-pointer hover:border-primary-500 transition-colors"
-          @dragover.prevent
-          @drop="onDrop"
-        >
-          <UIcon name="i-heroicons-photo" class="text-4xl text-gray-500 mb-2" />
-          <span class="text-sm text-gray-400">クリックまたはドロップ</span>
-          <span class="text-xs text-gray-600 mt-1">PNG / JPG / WEBP</span>
-          <input
-            type="file"
-            class="hidden"
-            accept="image/png,image/jpeg,image/webp"
-            @change="onFileChange"
-          />
-        </label>
-
-        <div
-          v-if="sourceImageUrl"
-          class="rounded-lg overflow-hidden border border-gray-800"
-        >
-          <img :src="sourceImageUrl" class="w-full object-contain max-h-48" />
-        </div>
-
-        <div v-if="bgRemovedImg" class="flex flex-col gap-1">
-          <span class="text-xs text-gray-500">背景除去後</span>
-          <div
-            class="rounded-lg overflow-hidden border border-gray-700 bg-[#888] bg-[repeating-conic-gradient(#aaa_0%_25%,#888_0%_50%)] bg-size-[12px_12px]"
-          >
-            <img
-              :src="bgRemovedImg.src"
-              class="w-full object-contain max-h-48"
-            />
-          </div>
-        </div>
-
-        <p class="text-xs text-gray-500 leading-relaxed">
-          アニメ立ち絵・正面推奨<br />
-          横顔・髪が画面外は不向き
-        </p>
-      </section>
-
-      <!-- 中央: Canvas プレビュー -->
-      <section class="flex-1 flex flex-col gap-3 overflow-auto min-w-0">
-        <h2
-          class="text-sm font-semibold text-gray-400 uppercase tracking-wider"
-        >
-          プレビュー (256×256)
-        </h2>
-
-        <div class="flex gap-4 flex-wrap">
-          <!-- 元画像 + オーバーレイ -->
-          <div class="flex flex-col gap-1">
-            <span class="text-xs text-gray-500">元画像 + オーバーレイ</span>
-            <div class="relative">
-              <canvas
-                ref="canvasRef"
-                :width="CANVAS_SIZE"
-                :height="CANVAS_SIZE"
-                class="border border-gray-700 rounded-lg"
-                style="image-rendering: pixelated; width: 400px; height: 400px"
-              />
-              <div
-                v-if="segmentProcessing || cvLoading"
-                class="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg"
-              >
-                <UIcon
-                  name="i-heroicons-arrow-path"
-                  class="animate-spin text-3xl text-primary-400"
-                />
-              </div>
-            </div>
-          </div>
-
-          <!-- 髪シルエット専用ビュー -->
-          <div v-if="hairMaskResult" class="flex flex-col gap-1">
-            <span class="text-xs text-gray-500">髪シルエット</span>
-            <canvas
-              ref="silhouetteCanvasRef"
-              :width="CANVAS_SIZE"
-              :height="CANVAS_SIZE"
-              class="border border-gray-700 rounded-lg"
-              style="image-rendering: pixelated; width: 400px; height: 400px"
-            />
-          </div>
-        </div>
-
-        <p class="text-sm text-gray-400">{{ statusMessage }}</p>
-      </section>
-
-      <!-- 右: コントロール -->
-      <section class="w-60 flex-shrink-0 flex flex-col gap-4 overflow-y-auto">
-        <h2
-          class="text-sm font-semibold text-gray-400 uppercase tracking-wider"
-        >
-          コントロール
-        </h2>
-
-        <!-- 背景除去オプション -->
-        <UCard>
-          <template #header>
-            <span class="text-sm font-medium">解析オプション</span>
-          </template>
-          <UToggle v-model="enableBgRemoval" label="背景除去してから解析">
-            <template #description>
-              <span class="text-xs text-gray-500">
-                複雑な背景の画像に有効（初回は数十秒かかります）
-              </span>
+    <main class="container mx-auto p-4 lg:p-6 max-w-6xl">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- 左カラム: アップロード・クロップ・設定 -->
+        <div class="space-y-4">
+          <!-- アップロード -->
+          <UCard>
+            <template #header>
+              <span class="text-sm font-medium">画像を読み込む</span>
             </template>
-          </UToggle>
-        </UCard>
-
-        <!-- 髪型解析ボタン -->
-        <UButton
-          block
-          color="primary"
-          variant="solid"
-          icon="i-heroicons-magnifying-glass"
-          :disabled="
-            !sourceImageUrl || segmentProcessing || cvLoading || !segmentReady
-          "
-          :loading="segmentProcessing || cvLoading"
-          @click="runPhase2Analysis"
-        >
-          髪型解析
-        </UButton>
-
-        <!-- オーバーレイ切替 -->
-        <UCard>
-          <template #header>
-            <span class="text-sm font-medium">オーバーレイ</span>
-          </template>
-          <div class="flex flex-col gap-2">
-            <UToggle
-              v-model="showGrid"
-              label="グリッド"
-              @update:model-value="redraw"
-            />
-            <UToggle
-              v-model="showCenterLine"
-              label="中央ライン"
-              @update:model-value="redraw"
-            />
-            <UDivider class="my-1" />
-            <UToggle
-              v-model="showHairMask"
-              label="髪マスク"
-              :disabled="!hairMaskResult"
-              @update:model-value="redraw"
-            />
-            <UToggle
-              v-model="showContours"
-              label="輪郭"
-              :disabled="!rawContours"
-              @update:model-value="redraw"
-            />
-            <UToggle
-              v-model="showSilhouette"
-              label="シルエット"
-              :disabled="!simplifiedContours"
-              @update:model-value="redraw"
-            />
-            <UToggle
-              v-model="showSmoothSilhouette"
-              label="スムーズシルエット"
-              :disabled="!simplifiedContours"
-              @update:model-value="redraw"
-            />
-          </div>
-        </UCard>
-
-        <!-- シルエット最適化スライダー -->
-        <UCard v-if="rawContours">
-          <template #header>
-            <span class="text-sm font-medium">シルエット最適化</span>
-          </template>
-          <div class="flex flex-col gap-2">
-            <div class="flex justify-between text-xs text-gray-400">
-              <span>単純化強度</span>
-              <span>{{ dpEpsilon.toFixed(1) }}</span>
+            <div
+              class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors select-none"
+              :class="
+                isDraggingOver
+                  ? 'border-sky-400 bg-sky-950/30'
+                  : 'border-slate-700 hover:border-slate-500'
+              "
+              @click="fileInputRef?.click()"
+              @dragover.prevent="isDraggingOver = true"
+              @dragleave="isDraggingOver = false"
+              @drop="onDrop"
+            >
+              <div class="text-4xl mb-2">🖼</div>
+              <p class="text-sm text-slate-400">クリックまたはドロップ</p>
+              <p class="text-xs text-slate-600 mt-1">PNG · JPG · WEBP</p>
             </div>
             <input
-              v-model.number="dpEpsilon"
-              type="range"
-              min="0.5"
-              max="10"
-              step="0.5"
-              class="w-full accent-primary-500"
+              ref="fileInputRef"
+              type="file"
+              class="hidden"
+              accept="image/*"
+              @change="onFileChange"
             />
-            <div class="flex justify-between text-xs text-gray-500">
-              <span>再現重視</span>
-              <span>描きやすさ重視</span>
-            </div>
-            <p class="text-xs text-gray-400 mt-1">
-              輪郭点数: {{ contourTotalPoints }}
-            </p>
-          </div>
-        </UCard>
+          </UCard>
 
-        <!-- 色ガイド -->
-        <UCard v-if="hairColorGuide">
-          <template #header>
-            <span class="text-sm font-medium">色ガイド</span>
-          </template>
-          <div class="flex flex-col gap-2">
-            <div
-              v-for="(entry, key) in {
-                ベース: hairColorGuide.base,
-                影: hairColorGuide.shadow,
-                ハイライト: hairColorGuide.highlight,
-              }"
-              :key="key"
-              class="flex items-center gap-2"
-            >
-              <div
-                class="w-6 h-6 rounded border border-gray-600 shrink-0"
-                :style="{ background: entry }"
-              />
-              <span class="text-xs text-gray-400">{{ key }}</span>
-              <span class="text-xs text-gray-500 ml-auto font-mono">{{
-                entry
-              }}</span>
-            </div>
-          </div>
-        </UCard>
-
-        <!-- 描画難易度 -->
-        <UCard v-if="drawAnalysis">
-          <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-medium">描画難易度</span>
-              <UBadge
-                :color="gradeBadgeColor(drawAnalysis.grade)"
-                variant="soft"
+          <!-- クロップ -->
+          <UCard v-if="sourceImg">
+            <template #header>
+              <span class="text-sm font-medium">切り取り範囲</span>
+              <span class="text-xs text-slate-500 ml-2"
+                >コーナーをドラッグで調整</span
               >
-                {{ drawAnalysis.grade }}
-              </UBadge>
+            </template>
+            <div class="flex justify-center">
+              <canvas
+                ref="cropCanvasRef"
+                class="max-w-full rounded"
+                @mousedown="onMousedown"
+                @mousemove="onMousemove"
+                @mouseup="onMouseup"
+                @mouseleave="onMouseup"
+              />
             </div>
-          </template>
-          <ul class="text-xs text-gray-400 space-y-1">
-            <li
-              v-for="tip in drawAnalysis.tips"
-              :key="tip"
-              class="leading-relaxed"
-            >
-              {{ tip }}
-            </li>
-          </ul>
-        </UCard>
+          </UCard>
 
-        <!-- 描画順ガイド -->
-        <UCard>
-          <template #header>
-            <span class="text-sm font-medium">描画順ガイド</span>
-          </template>
-          <template v-if="drawAnalysis">
-            <ol class="text-xs text-gray-400 space-y-1 list-none">
-              <li v-for="step in drawAnalysis.drawingOrder" :key="step">
-                {{ step }}
-              </li>
-            </ol>
-          </template>
-          <template v-else>
-            <ol
-              class="text-xs text-gray-400 space-y-1 list-decimal list-inside"
-            >
-              <li>シルエット塗り</li>
-              <li>前髪ライン</li>
-              <li>横髪追加</li>
-              <li>ハイライト</li>
-              <li>微調整</li>
-            </ol>
-          </template>
-        </UCard>
+          <!-- 変換設定 -->
+          <UCard v-if="sourceImg">
+            <template #header>
+              <span class="text-sm font-medium">変換設定</span>
+            </template>
+            <div class="space-y-4">
+              <div>
+                <p class="text-xs text-slate-400 mb-2">解像度</p>
+                <div class="flex gap-2">
+                  <UButton
+                    v-for="size in [64, 128, 256]"
+                    :key="size"
+                    :variant="targetSize === size ? 'solid' : 'outline'"
+                    size="sm"
+                    @click="targetSize = size as 64 | 128 | 256"
+                  >
+                    {{ size }}×{{ size }}
+                  </UButton>
+                </div>
+              </div>
+              <UButton class="w-full" @click="onConvert"> 変換する </UButton>
+            </div>
+          </UCard>
+        </div>
 
-        <!-- PNG 出力 -->
-        <UButton
-          block
-          color="neutral"
-          variant="outline"
-          icon="i-heroicons-arrow-down-tray"
-          :disabled="!sourceImageUrl"
-          @click="downloadPng"
-        >
-          PNG 出力
-        </UButton>
-      </section>
+        <!-- 右カラム: ドット絵・カラーパレット -->
+        <div class="space-y-4">
+          <!-- ドット絵プレビュー -->
+          <UCard v-if="resultImageData">
+            <template #header>
+              <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-3">
+                  <span class="text-sm font-medium">ドット絵プレビュー</span>
+                  <span
+                    v-if="hoveredPixel"
+                    class="text-xs font-mono text-slate-400"
+                  >
+                    ({{ hoveredPixel.x }}, {{ hoveredPixel.y }})
+                    <span
+                      class="inline-block w-3 h-3 rounded-sm align-middle mx-1 border border-white/20"
+                      :style="{ backgroundColor: hoveredPixel.hex }"
+                    />
+                    {{ hoveredPixel.hex.toUpperCase() }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-500">ズーム</span>
+                  <div class="flex gap-1">
+                    <UButton
+                      v-for="z in zoomOptions"
+                      :key="z"
+                      :variant="zoomLevel === z ? 'solid' : 'ghost'"
+                      size="xs"
+                      @click="zoomLevel = z"
+                    >
+                      {{ z }}x
+                    </UButton>
+                  </div>
+                  <UButton
+                    size="xs"
+                    variant="ghost"
+                    icon="i-heroicons-arrow-down-tray"
+                    @click="onDownload"
+                  >
+                    保存
+                  </UButton>
+                </div>
+              </div>
+            </template>
+            <div class="overflow-auto" style="max-height: 540px">
+              <canvas
+                ref="pixelGridCanvasRef"
+                style="image-rendering: pixelated"
+                @mousemove="onPixelHover"
+                @mouseleave="hoveredPixel = null"
+              />
+            </div>
+          </UCard>
+
+          <!-- カラーパレット -->
+          <UCard v-if="colorPalette.length > 0">
+            <template #header>
+              <span class="text-sm font-medium">カラーパレット</span>
+              <span class="text-xs text-slate-500 ml-2"
+                >{{ colorPalette.length }}色</span
+              >
+            </template>
+            <div class="space-y-1 max-h-80 overflow-y-auto pr-1">
+              <div
+                v-for="entry in colorPalette.slice(0, 200)"
+                :key="entry.hex"
+                class="flex items-center gap-2 text-xs group cursor-pointer hover:bg-slate-800/50 rounded px-1 py-0.5 transition-colors"
+                :title="`クリックでコピー: ${entry.hex.toUpperCase()}`"
+                @click="onCopyHex(entry.hex)"
+              >
+                <div
+                  class="w-5 h-5 rounded shrink-0 border border-white/10"
+                  :style="{ backgroundColor: entry.hex }"
+                />
+                <code class="font-mono text-slate-300 w-20 shrink-0">
+                  {{ entry.hex.toUpperCase() }}
+                </code>
+                <div
+                  class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"
+                >
+                  <div
+                    class="h-full rounded-full"
+                    :style="{
+                      width: `${(entry.count / (colorPalette[0]?.count ?? 1)) * 100}%`,
+                      backgroundColor: entry.hex,
+                    }"
+                  />
+                </div>
+                <span class="text-slate-500 w-12 text-right shrink-0">
+                  {{ entry.percentage.toFixed(1) }}%
+                </span>
+              </div>
+            </div>
+          </UCard>
+        </div>
+      </div>
     </main>
   </div>
 </template>
