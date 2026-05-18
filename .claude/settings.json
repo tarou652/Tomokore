@@ -7,11 +7,7 @@
       "Bash(git status)",
       "Bash(git diff *)"
     ],
-    "deny": [
-      "Bash(rm -rf *)",
-      "Bash(git push --force*)",
-      "Write(.env*)"
-    ]
+    "deny": ["Bash(rm -rf *)", "Bash(git push --force*)", "Write(.env*)"]
   },
   "hooks": {
     "PostToolUse": [

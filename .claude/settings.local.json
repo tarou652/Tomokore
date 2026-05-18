@@ -10,7 +10,9 @@
       "Bash(npx nuxi@3.12.0 init /tmp/nuxt-temp --package-manager npm --no-git-init)",
       "Bash(npm install *)",
       "Bash(cd /c/code/tomokore/TomodachiHairTrace && ls -la)",
-      "Read(//c/c/code/tomokore/**)"
+      "Read(//c/c/code/tomokore/**)",
+      "Bash(Select-String -Path \"c:\\\\code\\\\tomokore\\\\TomodachiHairTrace\\\\node_modules\\\\@mediapipe\\\\tasks-vision\\\\vision.d.ts\" -Pattern \"ImageSegmenter\")",
+      "Bash(Select-Object -First 30)"
     ]
   }
 }
