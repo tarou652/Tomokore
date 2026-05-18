@@ -190,6 +190,63 @@ export function useHairCanvas(canvasRef: Ref<HTMLCanvasElement | null>) {
     drawContourLines(contours, maskWidth, maskHeight, box, color, lineWidth);
   }
 
+  function drawCardinalSpline(
+    ctx: CanvasRenderingContext2D,
+    pts: Array<{ x: number; y: number }>,
+    tension = 0.4,
+  ) {
+    if (pts.length < 3) return;
+    const n = pts.length;
+    const getP = (i: number) => pts[((i % n) + n) % n];
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 0; i < n; i++) {
+      const p0 = getP(i - 1);
+      const p1 = getP(i);
+      const p2 = getP(i + 1);
+      const p3 = getP(i + 2);
+      const cp1x = p1.x + ((p2.x - p0.x) * tension) / 3;
+      const cp1y = p1.y + ((p2.y - p0.y) * tension) / 3;
+      const cp2x = p2.x - ((p3.x - p1.x) * tension) / 3;
+      const cp2y = p2.y - ((p3.y - p1.y) * tension) / 3;
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+    ctx.closePath();
+  }
+
+  function drawSmoothSilhouette(
+    contours: Contour[],
+    maskWidth: number,
+    maskHeight: number,
+    box: FaceBox,
+    color = "rgba(255, 140, 0, 0.9)",
+    lineWidth = 2.5,
+  ) {
+    const ctx = getCtx();
+    if (!ctx) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    for (const pts of contours) {
+      if (pts.length < 3) continue;
+      const scaleX = maskWidth > 0 ? box.width / maskWidth : 1;
+      const scaleY = maskHeight > 0 ? box.height / maskHeight : 1;
+      const canvasPts = pts.map((p) => {
+        const [x, y] = toCanvasCoord(
+          p.x * scaleX + box.x,
+          p.y * scaleY + box.y,
+          box,
+        );
+        return { x, y };
+      });
+      ctx.beginPath();
+      drawCardinalSpline(ctx, canvasPts);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawBangHighlight(
     bangMask: Uint8Array | null,
     bangYMaxInCanvas: number,
@@ -220,6 +277,7 @@ export function useHairCanvas(canvasRef: Ref<HTMLCanvasElement | null>) {
     drawHairMask,
     drawContourLines,
     drawSilhouette,
+    drawSmoothSilhouette,
     drawBangHighlight,
   };
 }

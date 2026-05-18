@@ -27,6 +27,7 @@ export function useFaceDetect() {
       },
       numFaces: 1,
       runningMode: "IMAGE",
+      minFaceDetectionConfidence: 0.3,
     });
     isReady.value = true;
   }
