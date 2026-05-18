@@ -1,0 +1,24 @@
+{
+  "name": "TomodachiHairTrace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "dependencies": {
+    "@nuxt/content": "^3.13.0",
+    "@nuxt/eslint": "^1.15.2",
+    "@nuxt/image": "^2.0.0",
+    "@nuxt/ui": "^4.7.1",
+    "better-sqlite3": "^12.10.0",
+    "eslint": "^10.4.0",
+    "nuxt": "^4.4.4",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "vue": "^3.5.34",
+    "vue-router": "^5.0.7"
+  }
+}
