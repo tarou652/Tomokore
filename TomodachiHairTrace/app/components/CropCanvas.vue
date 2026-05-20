@@ -21,20 +21,38 @@ defineExpose({ getCroppedCanvas });
 </script>
 
 <template>
-  <UCard>
-    <template #header>
-      <span class="text-sm font-medium">切り取り範囲</span>
-      <span class="text-xs text-slate-500 ml-2">コーナーをドラッグで調整</span>
-    </template>
-    <div class="flex justify-center">
+  <section class="card">
+    <header class="card-header" style="background: #beebd3">
+      <div class="flex items-center gap-2">
+        <div
+          class="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0"
+          style="border: 2px solid #2a1f1b; box-shadow: 0 2px 0 0 #2a1f1b"
+        >
+          <span style="font-size: 14px">✂️</span>
+        </div>
+        <div>
+          <h2
+            class="font-bold"
+            style="font-size: 14px; color: #2a1f1b; line-height: 1.2"
+          >
+            きりとり
+          </h2>
+          <p style="font-size: 11px; color: #4a3a33; margin-top: 2px">
+            コーナーをひっぱって調整
+          </p>
+        </div>
+      </div>
+    </header>
+    <div class="p-4 flex justify-center">
       <canvas
         ref="cropCanvasRef"
-        class="max-w-full rounded"
+        class="max-w-full rounded-xl"
+        style="border: 2px solid #2a1f1b"
         @mousedown="onMousedown"
         @mousemove="onMousemove"
         @mouseup="onMouseup"
         @mouseleave="onMouseup"
       />
     </div>
-  </UCard>
+  </section>
 </template>
