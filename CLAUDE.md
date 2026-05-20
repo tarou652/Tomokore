@@ -31,11 +31,82 @@
 
 ## コーディング規約
 
-- TypeScript を使用する
-- コメントは「なぜ」が自明でない場合のみ書く
+### 基本方針
+
+- TypeScript を使用する（`any` 型禁止。`unknown` + 型ガードを使う）
+- マジックナンバー禁止。数値リテラルは必ず名前付き定数に切り出す
+- Tailwind のみでスタイリングする（`<style>` ブロック原則不使用）
+
+### ファイル構成・コンポーネント化
+
 - UIコンポーネントは `components/` 以下に配置
 - 画像処理ロジックは `composables/` または `utils/` に分離する
 - Canvas操作はコンポーネントに直接書かず、composableに切り出す
+- **1ファイル200行超えたらコンポーネント分割を検討する**
+- なるべく小さな単位でコンポーネント化し、再利用性を高める
+
+### `.vue` ファイルの記述順
+
+```
+<script setup lang="ts">  ← JS
+</script>
+
+<template>               ← HTML
+</template>
+
+<style scoped>           ← CSS（使う場合のみ）
+</style>
+```
+
+### `<script setup>` 内の記述順
+
+```
+1. import
+2. defineProps / defineEmits
+3. 定数（SCREAMING_SNAKE_CASE）
+4. ref / reactive 変数
+5. computed
+6. composable の呼び出し
+7. ライフサイクルフック（onMounted 等）
+8. 関数
+```
+
+### Props / Emits
+
+- Props は必ず `defineProps<{}>` で TypeScript 型を明示する
+- デフォルト値は `withDefaults` で明示する
+- Emits も `defineEmits<{}>` で型定義する
+
+### 命名規則
+
+| 対象                   | 規則                 | 例                      |
+| ---------------------- | -------------------- | ----------------------- |
+| コンポーネントファイル | PascalCase           | `CropCanvas.vue`        |
+| composable             | `use` + camelCase    | `useImageCrop`          |
+| イベントハンドラ関数   | `on` + PascalCase    | `onFileChange`          |
+| 定数                   | SCREAMING_SNAKE_CASE | `ZOOM_LEVELS`           |
+| 変数・関数             | camelCase            | `zoomLevel`, `zoomStep` |
+
+### コメント規則
+
+- **関数には必ずコメントを書く**（何をする関数かを1行で説明）
+- ロジックの「なぜ」が自明でない箇所にはインラインコメントを追加する
+- 自明な処理にコメントは不要
+
+```ts
+/** クロップ範囲を正規化してキャンバスに描画する */
+function draw() { ... }
+
+/** Photoshop準拠のズーム段階リスト */
+const ZOOM_LEVELS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16]
+```
+
+### テスト
+
+- composable のユニットテストは **必須**（Vitest）
+- コンポーネントテストは `@vue/test-utils` で主要な入力→出力を検証する
+- Canvas / MediaPipe / TensorFlow.js 等のブラウザAPIはモックする
+- テストファイルは対象と同階層の `__tests__/` に配置する
 
 ---
 
