@@ -9,6 +9,8 @@
     "preview": "nuxt preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "@nuxt/eslint": "^1.15.2",
     "@nuxt/ui": "^4.7.1",
     "eslint": "^10.4.0",
     "nuxt": "^4.4.4",
