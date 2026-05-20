@@ -15,6 +15,14 @@ const LABEL_MARGIN_TOP = 20;
 const GRID_LINE_MIN_ZOOM = 2;
 /** 透明ピクセルと判断するアルファ閾値 */
 const CHECKERBOARD_ALPHA = 128;
+/** キャンバス背景色 */
+const CANVAS_BG = "#fffcf3";
+/** 透明ピクセルのチェッカー色A */
+const CHECKER_A = "#f1e3c5";
+/** グリッド線の色 */
+const GRID_LINE_COLOR = "rgba(42,31,27,0.10)";
+/** 座標ラベルの色 */
+const LABEL_COLOR = "#9c8d81";
 
 const props = defineProps<{
   imageData: ImageData;
@@ -119,7 +127,7 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
   canvas.height = height * zoom + mTop;
 
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#0f172a";
+  ctx.fillStyle = CANVAS_BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   for (let py = 0; py < height; py++) {
@@ -127,7 +135,7 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
       const i = (py * width + px) * 4;
       const a = data[i + 3] ?? 255;
       if (a < CHECKERBOARD_ALPHA) {
-        ctx.fillStyle = (px + py) % 2 === 0 ? "#444" : "#333";
+        ctx.fillStyle = (px + py) % 2 === 0 ? CHECKER_A : CANVAS_BG;
       } else {
         ctx.fillStyle = `rgb(${data[i]},${data[i + 1]},${data[i + 2]})`;
       }
@@ -136,7 +144,7 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
   }
 
   if (zoom >= GRID_LINE_MIN_ZOOM) {
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.strokeStyle = GRID_LINE_COLOR;
     ctx.lineWidth = 0.5;
     for (let xi = 0; xi <= width; xi++) {
       const px = mLeft + xi * zoom + 0.5;
@@ -157,7 +165,7 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
   if (showLabels) {
     // ズーム倍率に応じてラベル表示間隔を調整する
     const step = zoom >= 16 ? 1 : zoom >= 8 ? 2 : 4;
-    ctx.fillStyle = "#64748b";
+    ctx.fillStyle = LABEL_COLOR;
     ctx.font = "9px monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -221,87 +229,128 @@ onUnmounted(() => document.removeEventListener("keydown", onKeydown));
 watch(zoomLevel, (z) => nextTick(() => renderPixelGrid(props.imageData, z)));
 watch(
   () => props.imageData,
-  (data) => nextTick(() => renderPixelGrid(data, zoomLevel.value)),
+  (data) =>
+    nextTick(() => {
+      zoomFit();
+      renderPixelGrid(data, zoomLevel.value);
+    }),
 );
 </script>
 
 <template>
-  <UCard class="overflow-hidden">
-    <template #header>
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <div class="flex items-center gap-3">
-          <span class="text-sm font-medium">ドット絵プレビュー</span>
-          <span v-if="hoveredPixel" class="text-xs font-mono text-slate-400">
+  <section class="card" style="overflow: hidden">
+    <header class="card-header" style="background: #c4e3f7">
+      <div class="flex items-center gap-2 min-w-0">
+        <div
+          class="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0"
+          style="border: 2px solid #2a1f1b; box-shadow: 0 2px 0 0 #2a1f1b"
+        >
+          <span style="font-size: 14px">✨</span>
+        </div>
+        <div class="min-w-0">
+          <h2
+            class="font-bold"
+            style="font-size: 14px; color: #2a1f1b; line-height: 1.2"
+          >
+            ドット絵プレビュー
+          </h2>
+          <p
+            v-if="hoveredPixel"
+            class="mono flex items-center gap-1"
+            style="font-size: 11px; color: #4a3a33; margin-top: 2px"
+          >
             ({{ hoveredPixel.x }}, {{ hoveredPixel.y }})
             <span
-              class="inline-block w-3 h-3 rounded-sm align-middle mx-1 border border-white/20"
-              :style="{ backgroundColor: hoveredPixel.hex }"
+              class="inline-block w-3 h-3 rounded-sm align-middle"
+              style="border: 1px solid #2a1f1b"
+              :style="{ background: hoveredPixel.hex }"
             />
             {{ hoveredPixel.hex.toUpperCase() }}
-          </span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <UButton
-            size="xs"
-            variant="ghost"
-            title="実際のサイズ (Ctrl+1)"
-            @click="zoomLevel = 1"
+          </p>
+          <p
+            v-else
+            class="mono"
+            style="font-size: 11px; color: #4a3a33; margin-top: 2px"
           >
-            1:1
-          </UButton>
-          <UButton
-            size="xs"
-            variant="ghost"
-            title="ウィンドウに合わせる (Ctrl+0)"
-            @click="zoomFit"
-          >
-            Fit
-          </UButton>
-          <div class="w-px h-4 bg-slate-700 mx-0.5" />
-          <UButton
-            size="xs"
-            variant="ghost"
-            icon="i-heroicons-minus-small"
-            title="ズームアウト (Ctrl+-)"
-            @click="zoomStep(-1)"
-          />
-          <span
-            class="text-xs font-mono text-slate-300 w-10 text-center select-none"
-          >
-            {{ zoomLevel * 100 }}%
-          </span>
-          <UButton
-            size="xs"
-            variant="ghost"
-            icon="i-heroicons-plus-small"
-            title="ズームイン (Ctrl++)"
-            @click="zoomStep(1)"
-          />
-          <div class="w-px h-4 bg-slate-700 mx-0.5" />
-          <UButton
-            size="xs"
-            variant="ghost"
-            icon="i-heroicons-arrow-down-tray"
-            title="PNG保存"
-            @click="onDownload"
-          >
-            保存
-          </UButton>
+            {{ props.imageData.width }}×{{ props.imageData.height }} px · ズーム
+            {{ zoomLevel }}×
+          </p>
         </div>
       </div>
-    </template>
+      <div class="flex items-center gap-1 shrink-0">
+        <button
+          class="btn"
+          title="実際のサイズ (Ctrl+1)"
+          @click="zoomLevel = 1"
+        >
+          1:1
+        </button>
+        <button
+          class="btn"
+          title="ウィンドウに合わせる (Ctrl+0)"
+          @click="zoomFit"
+        >
+          Fit
+        </button>
+        <span
+          class="inline-block w-px h-5 mx-0.5"
+          style="background: rgba(42, 31, 27, 0.25)"
+        />
+        <button
+          class="btn btn-icon"
+          title="ズームアウト (Ctrl+-)"
+          @click="zoomStep(-1)"
+        >
+          −
+        </button>
+        <span
+          class="mono font-bold text-center tabular-nums"
+          style="width: 48px; font-size: 12px; color: #2a1f1b"
+        >
+          {{ zoomLevel * 100 }}%
+        </span>
+        <button
+          class="btn btn-icon"
+          title="ズームイン (Ctrl++)"
+          @click="zoomStep(1)"
+        >
+          +
+        </button>
+        <span
+          class="inline-block w-px h-5 mx-0.5"
+          style="background: rgba(42, 31, 27, 0.25)"
+        />
+        <button class="btn btn-primary" title="PNG保存" @click="onDownload">
+          ↓ 保存
+        </button>
+      </div>
+    </header>
     <div
       ref="pixelGridContainerRef"
-      class="overflow-auto"
+      class="nice-scroll"
+      style="background: #fffcf3; overflow: auto; width: 100%"
       :style="{ maxHeight: `${GRID_MAX_HEIGHT}px` }"
       @wheel="onWheel"
     >
       <canvas
         ref="pixelGridCanvasRef"
-        style="image-rendering: pixelated"
+        style="image-rendering: pixelated; cursor: crosshair; display: block"
         @mousemove="onPixelHover"
         @mouseleave="hoveredPixel = null"
       />
     </div>
-  </UCard>
+    <div
+      class="flex items-center justify-between mono px-4 py-2"
+      style="
+        font-size: 10px;
+        color: #7a6a5f;
+        border-top: 1px solid rgba(42, 31, 27, 0.1);
+      "
+    >
+      <span>Ctrl + ホイールでズーム · Ctrl+0 フィット · Ctrl+1 等倍</span>
+      <span class="font-bold" style="color: #4a3a33">
+        {{ props.imageData.width * props.imageData.height }} px
+      </span>
+    </div>
+  </section>
 </template>
