@@ -5,8 +5,8 @@ const CANVAS_SIZE = 256;
 // トモコレ顔の正規化比率（256px内での顔位置）
 const FACE_CENTER_X = 0.5;
 const FACE_CENTER_Y = 0.55;
-const FACE_WIDTH_RATIO = 0.55;  // 顔幅/キャンバス幅
-const FACE_HEIGHT_RATIO = 0.6;  // 顔高さ/キャンバス高さ
+const FACE_WIDTH_RATIO = 0.55; // 顔幅/キャンバス幅
+const FACE_HEIGHT_RATIO = 0.6; // 顔高さ/キャンバス高さ
 
 export function useHairTraceCanvas() {
   function drawGuide(

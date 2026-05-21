@@ -17,9 +17,8 @@ async function ensureLandmarker() {
   if (loadPromise) return loadPromise;
 
   loadPromise = (async () => {
-    const filesetResolver = await FilesetResolver.forVisionTasks(
-      "/mediapipe-wasm",
-    );
+    const filesetResolver =
+      await FilesetResolver.forVisionTasks("/mediapipe-wasm");
     landmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
       baseOptions: {
         modelAssetPath:
@@ -37,8 +36,16 @@ async function ensureLandmarker() {
 
 // MediaPipe face mesh landmark index groups
 // ref: https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model_uv_visualization.png
-const FOREHEAD_INDICES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
-const FACE_OVAL_INDICES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+const FOREHEAD_INDICES = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378,
+  400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21,
+  54, 103, 67, 109,
+];
+const FACE_OVAL_INDICES = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378,
+  400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21,
+  54, 103, 67, 109,
+];
 
 export function useFaceDetection() {
   const isLoading = ref(false);
@@ -69,7 +76,10 @@ export function useFaceDetection() {
     if (!lms) return null;
 
     // 顔の外接矩形
-    let minX = 1, maxX = 0, minY = 1, maxY = 0;
+    let minX = 1,
+      maxX = 0,
+      minY = 1,
+      maxY = 0;
     for (const lm of lms) {
       if (lm.x < minX) minX = lm.x;
       if (lm.x > maxX) maxX = lm.x;
