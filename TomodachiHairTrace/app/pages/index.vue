@@ -17,6 +17,7 @@ const zoomLevel = ref(4);
 const hoveredPixel = ref<{ x: number; y: number; hex: string } | null>(null);
 const snapColorCount = ref(16);
 const isSnapped = ref(false);
+const useAiMode = ref(false);
 
 const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
   useImageCrop(cropCanvasRef);
@@ -255,12 +256,18 @@ const sizeOptions = [32, 64, 128, 256] as const;
                   </UButton>
                 </div>
               </div>
+              <!-- AI切り替え -->
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <input v-model="useAiMode" type="checkbox" class="w-4 h-4 accent-sky-400 rounded" />
+                <span class="text-sm text-slate-300">AI 変換を使用する</span>
+                <span class="text-xs text-slate-600">（強力なPC推奨）</span>
+              </label>
+
               <!-- 通常変換 -->
-              <UButton class="w-full" @click="onConvert">変換する</UButton>
+              <UButton v-if="!useAiMode" class="w-full" @click="onConvert">変換する</UButton>
 
-              <div class="border-t border-slate-800 pt-4 space-y-3">
-                <p class="text-xs text-slate-400">AI 変換 <span class="text-slate-600">— アニメ強調 → ダウンスケール</span></p>
-
+              <!-- AI変換 -->
+              <div v-else class="space-y-3">
                 <!-- プログレス -->
                 <div v-if="aiState.status === 'loading'" class="space-y-1">
                   <div class="flex justify-between text-xs text-slate-500">
@@ -277,8 +284,7 @@ const sizeOptions = [32, 64, 128, 256] as const;
 
                 <UButton
                   class="w-full"
-                  variant="outline"
-                  color="sky"
+                  color="info"
                   :loading="aiState.status === 'loading' || aiState.status === 'running'"
                   :disabled="aiState.status === 'loading' || aiState.status === 'running'"
                   @click="onAiConvert"

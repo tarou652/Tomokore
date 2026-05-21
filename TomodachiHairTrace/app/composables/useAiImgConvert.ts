@@ -22,24 +22,26 @@ export function useAiImgConvert() {
 
     pipe = await pipeline("image-to-image", MODEL_ID, {
       device: "webgpu",
-      progress_callback: (p: { progress?: number; status?: string }) => {
-        if (typeof p.progress === "number") {
+      progress_callback: (p: Record<string, unknown>) => {
+        const prog = typeof p["progress"] === "number" ? p["progress"] : null;
+        if (prog !== null) {
           state.value = {
             status: "loading",
-            progress: Math.round(p.progress),
-            message: `モデルを読み込み中… ${Math.round(p.progress)}%`,
+            progress: Math.round(prog),
+            message: `モデルを読み込み中… ${Math.round(prog)}%`,
           };
         }
       },
     }).catch(async () => {
       // WebGPU非対応の場合はCPUにフォールバック
       return pipeline("image-to-image", MODEL_ID, {
-        progress_callback: (p: { progress?: number }) => {
-          if (typeof p.progress === "number") {
+        progress_callback: (p: Record<string, unknown>) => {
+          const prog = typeof p["progress"] === "number" ? p["progress"] : null;
+          if (prog !== null) {
             state.value = {
               status: "loading",
-              progress: Math.round(p.progress),
-              message: `モデルを読み込み中 (CPU)… ${Math.round(p.progress)}%`,
+              progress: Math.round(prog),
+              message: `モデルを読み込み中 (CPU)… ${Math.round(prog)}%`,
             };
           }
         },
