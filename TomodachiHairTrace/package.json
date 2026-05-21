@@ -6,7 +6,7 @@
     "build": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
-    "preview": "nuxt preview"
+    "deploy": "NUXT_APP_BASE_URL=/tomokore/ nuxt generate && npx gh-pages -d .output/public"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
