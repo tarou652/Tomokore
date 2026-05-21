@@ -6,7 +6,7 @@ export default defineNuxtConfig({
   ssr: false,
   vite: {
     optimizeDeps: {
-      exclude: ["@mediapipe/tasks-vision"],
+      exclude: ["@mediapipe/tasks-vision", "@huggingface/transformers"],
     },
   },
 });

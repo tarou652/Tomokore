@@ -9,6 +9,8 @@
     "preview": "nuxt preview"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@nuxt/eslint": "^1.15.2",
     "@nuxt/ui": "^4.7.1",
     "eslint": "^10.4.0",
     "nuxt": "^4.4.4",

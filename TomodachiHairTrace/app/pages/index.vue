@@ -2,6 +2,7 @@
 import { useImageCrop } from "~/composables/useImageCrop";
 import { extractColorPalette, type PaletteEntry } from "~/composables/useColorPalette";
 import { pixelSnap } from "~/composables/usePixelSnap";
+import { useAiImgConvert } from "~/composables/useAiImgConvert";
 
 const cropCanvasRef = ref<HTMLCanvasElement | null>(null);
 const pixelGridCanvasRef = ref<HTMLCanvasElement | null>(null);
@@ -19,6 +20,7 @@ const isSnapped = ref(false);
 
 const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
   useImageCrop(cropCanvasRef);
+const { state: aiState, load: aiLoad, convert: aiConvert } = useAiImgConvert();
 
 const defaultZoom: Record<number, number> = { 32: 8, 64: 4, 128: 2, 256: 1 };
 watch(targetSize, (size) => {
@@ -127,6 +129,13 @@ function onConvert() {
   const ctx = out.getContext("2d")!;
   const imageData = ctx.getImageData(0, 0, targetSize.value, targetSize.value);
   isSnapped.value = false;
+  applyAndRender(imageData);
+}
+
+async function onAiConvert() {
+  if (!sourceImg.value) return;
+  isSnapped.value = false;
+  const imageData = await aiConvert(sourceImg.value, targetSize.value);
   applyAndRender(imageData);
 }
 
@@ -246,7 +255,41 @@ const sizeOptions = [32, 64, 128, 256] as const;
                   </UButton>
                 </div>
               </div>
+              <!-- 通常変換 -->
               <UButton class="w-full" @click="onConvert">変換する</UButton>
+
+              <div class="border-t border-slate-800 pt-4 space-y-3">
+                <p class="text-xs text-slate-400">AI 変換 <span class="text-slate-600">— アニメ強調 → ダウンスケール</span></p>
+
+                <!-- プログレス -->
+                <div v-if="aiState.status === 'loading'" class="space-y-1">
+                  <div class="flex justify-between text-xs text-slate-500">
+                    <span>{{ aiState.message }}</span>
+                    <span>{{ aiState.progress }}%</span>
+                  </div>
+                  <div class="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      class="h-full bg-sky-500 rounded-full transition-all duration-300"
+                      :style="{ width: `${aiState.progress}%` }"
+                    />
+                  </div>
+                </div>
+
+                <UButton
+                  class="w-full"
+                  variant="outline"
+                  color="sky"
+                  :loading="aiState.status === 'loading' || aiState.status === 'running'"
+                  :disabled="aiState.status === 'loading' || aiState.status === 'running'"
+                  @click="onAiConvert"
+                >
+                  {{ aiState.status === 'running' ? 'AI処理中…' : 'AI 変換する' }}
+                </UButton>
+
+                <p v-if="aiState.status === 'idle'" class="text-xs text-slate-600">
+                  初回クリック時にモデル (~5MB) をダウンロードします
+                </p>
+              </div>
             </div>
           </UCard>
 
