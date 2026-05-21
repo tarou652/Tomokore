@@ -1,366 +1,362 @@
 <script setup lang="ts">
-import { useImageCrop } from "~/composables/useImageCrop";
+import CropCanvas from "~/components/CropCanvas.vue";
 import {
-  extractColorPalette,
+  quantizeColors,
   type PaletteEntry,
 } from "~/composables/useColorPalette";
 
-const cropCanvasRef = ref<HTMLCanvasElement | null>(null);
-const pixelGridCanvasRef = ref<HTMLCanvasElement | null>(null);
-const fileInputRef = ref<HTMLInputElement | null>(null);
+/** カラーパレットの最大色数 */
+const MAX_PALETTE_COLORS = 12;
+/** トーストの表示時間（ms） */
+const TOAST_DURATION = 1500;
 
+const cropCanvasRef = ref<InstanceType<typeof CropCanvas> | null>(null);
 const sourceImg = ref<HTMLImageElement | null>(null);
-const isDraggingOver = ref(false);
-const targetSize = ref<64 | 128 | 256>(64);
 const resultImageData = ref<ImageData | null>(null);
 const colorPalette = ref<PaletteEntry[]>([]);
-const zoomLevel = ref(4);
-const hoveredPixel = ref<{ x: number; y: number; hex: string } | null>(null);
+const toastMsg = ref<string | null>(null);
 
-const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
-  useImageCrop(cropCanvasRef);
-
-// デフォルトズームを解像度に合わせる
-watch(targetSize, (size) => {
-  zoomLevel.value = size === 64 ? 4 : size === 128 ? 2 : 1;
-});
-
-function loadImage(file: File) {
-  if (!file.type.startsWith("image/")) return;
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    sourceImg.value = img;
-    resultImageData.value = null;
-    colorPalette.value = [];
-    hoveredPixel.value = null;
-    nextTick(() => setImage(img));
-  };
-  img.src = url;
+/** 画像をリセットして全状態をクリアする */
+function onReset() {
+  sourceImg.value = null;
+  resultImageData.value = null;
+  colorPalette.value = [];
 }
 
-function onFileChange(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) loadImage(file);
-  (e.target as HTMLInputElement).value = "";
+/** トーストを一定時間表示する */
+function showToast(msg: string) {
+  toastMsg.value = msg;
+  setTimeout(() => {
+    toastMsg.value = null;
+  }, TOAST_DURATION);
 }
 
-function onDrop(e: DragEvent) {
-  isDraggingOver.value = false;
-  e.preventDefault();
-  const file = e.dataTransfer?.files?.[0];
-  if (file) loadImage(file);
+/** 画像がロードされたとき状態をリセットして新しい画像をセットする */
+function onImageLoaded(img: HTMLImageElement) {
+  sourceImg.value = img;
+  resultImageData.value = null;
+  colorPalette.value = [];
 }
 
-function toHex(r: number, g: number, b: number): string {
-  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
-}
-
-function renderPixelGrid(imageData: ImageData, zoom: number) {
-  const canvas = pixelGridCanvasRef.value;
-  if (!canvas) return;
-  const { width, height, data } = imageData;
-  const showLabels = zoom >= 4;
-  const mLeft = showLabels ? 32 : 0;
-  const mTop = showLabels ? 20 : 0;
-
-  canvas.width = width * zoom + mLeft;
-  canvas.height = height * zoom + mTop;
-
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#0f172a";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let py = 0; py < height; py++) {
-    for (let px = 0; px < width; px++) {
-      const i = (py * width + px) * 4;
-      const a = data[i + 3] ?? 255;
-      if (a < 128) {
-        ctx.fillStyle = (px + py) % 2 === 0 ? "#444" : "#333";
-      } else {
-        ctx.fillStyle = `rgb(${data[i]},${data[i + 1]},${data[i + 2]})`;
-      }
-      ctx.fillRect(mLeft + px * zoom, mTop + py * zoom, zoom, zoom);
-    }
-  }
-
-  // グリッド線
-  if (zoom >= 2) {
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 0.5;
-    for (let xi = 0; xi <= width; xi++) {
-      const px = mLeft + xi * zoom + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(px, mTop);
-      ctx.lineTo(px, mTop + height * zoom);
-      ctx.stroke();
-    }
-    for (let yi = 0; yi <= height; yi++) {
-      const py = mTop + yi * zoom + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(mLeft, py);
-      ctx.lineTo(mLeft + width * zoom, py);
-      ctx.stroke();
-    }
-  }
-
-  // 座標ラベル
-  if (showLabels) {
-    const step = zoom >= 16 ? 1 : zoom >= 8 ? 2 : 4;
-    ctx.fillStyle = "#64748b";
-    ctx.font = "9px monospace";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let yi = 0; yi < height; yi += step) {
-      ctx.fillText(String(yi), mLeft - 3, mTop + yi * zoom + zoom / 2);
-    }
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    for (let xi = 0; xi < width; xi += step) {
-      ctx.fillText(String(xi), mLeft + xi * zoom + zoom / 2, mTop - 2);
-    }
-  }
-}
-
-function onConvert() {
-  const out = getCroppedCanvas(targetSize.value);
+/** クロップ範囲をダウンサンプリングしてドット絵とカラーパレットを生成する */
+function onConvert(size: 64 | 128 | 256) {
+  const out = cropCanvasRef.value?.getCroppedCanvas(size);
   if (!out) return;
   const ctx = out.getContext("2d")!;
-  const imageData = ctx.getImageData(0, 0, targetSize.value, targetSize.value);
+  const imageData = ctx.getImageData(0, 0, size, size);
   resultImageData.value = imageData;
-  colorPalette.value = extractColorPalette(imageData);
-  nextTick(() => renderPixelGrid(imageData, zoomLevel.value));
+  colorPalette.value = quantizeColors(imageData, MAX_PALETTE_COLORS);
+  showToast(`変換完了 · ${size}×${size} · ${colorPalette.value.length}色`);
 }
 
-watch(zoomLevel, (z) => {
-  if (resultImageData.value) {
-    nextTick(() => renderPixelGrid(resultImageData.value!, z));
-  }
-});
-
-function onPixelHover(e: MouseEvent) {
-  const canvas = pixelGridCanvasRef.value;
-  if (!canvas || !resultImageData.value) return;
-  const rect = canvas.getBoundingClientRect();
-  const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const my = (e.clientY - rect.top) * (canvas.height / rect.height);
-  const showLabels = zoomLevel.value >= 4;
-  const mLeft = showLabels ? 32 : 0;
-  const mTop = showLabels ? 20 : 0;
-  const pxX = Math.floor((mx - mLeft) / zoomLevel.value);
-  const pxY = Math.floor((my - mTop) / zoomLevel.value);
-  const size = targetSize.value;
-  if (pxX < 0 || pxY < 0 || pxX >= size || pxY >= size) {
-    hoveredPixel.value = null;
-    return;
-  }
-  const { data } = resultImageData.value;
-  const i = (pxY * size + pxX) * 4;
-  hoveredPixel.value = {
-    x: pxX,
-    y: pxY,
-    hex: toHex(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0),
-  };
+/** カラーパレットからHEXコードをコピーしたときのフィードバックを表示する */
+function onHexCopied(hex: string) {
+  showToast(`コピーしました ${hex}`);
 }
-
-async function onCopyHex(hex: string) {
-  await navigator.clipboard.writeText(hex.toUpperCase()).catch(() => {});
-}
-
-function onDownload() {
-  const canvas = pixelGridCanvasRef.value;
-  if (!canvas) return;
-  const a = document.createElement("a");
-  a.href = canvas.toDataURL("image/png");
-  a.download = `pixel-${targetSize.value}x${targetSize.value}.png`;
-  a.click();
-}
-
-const zoomOptions = [1, 2, 4, 8, 16] as const;
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 text-slate-100">
-    <header class="border-b border-slate-800 px-6 py-4">
-      <h1 class="text-lg font-bold tracking-tight">Tomodachi Hair Trace</h1>
-      <p class="text-xs text-slate-500 mt-0.5">キャラ画像をドット絵に変換</p>
-    </header>
+  <div style="min-height: 100vh">
+    <!-- 装飾用フローティングシェイプ -->
+    <div
+      aria-hidden="true"
+      class="pointer-events-none fixed inset-0 overflow-hidden"
+      style="z-index: 0"
+    >
+      <div
+        class="absolute rounded-full float-1"
+        style="
+          top: 96px;
+          left: 6%;
+          width: 40px;
+          height: 40px;
+          background: #ffc8d6;
+          border: 2.5px solid #2a1f1b;
+        "
+      />
+      <div
+        class="absolute rounded-full float-2"
+        style="
+          top: 40%;
+          right: 5%;
+          width: 56px;
+          height: 56px;
+          background: #c4e3f7;
+          border: 2.5px solid #2a1f1b;
+        "
+      />
+      <div
+        class="absolute rounded-2xl rotate-12 float-3"
+        style="
+          bottom: 18%;
+          left: 4%;
+          width: 48px;
+          height: 48px;
+          background: #beebd3;
+          border: 2.5px solid #2a1f1b;
+        "
+      />
+      <div
+        class="absolute rotate-45 float-1"
+        style="
+          top: 68%;
+          right: 10%;
+          width: 32px;
+          height: 32px;
+          background: #ffd66b;
+          border: 2.5px solid #2a1f1b;
+        "
+      />
+    </div>
 
-    <main class="container mx-auto p-4 lg:p-6 max-w-6xl">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- 左カラム: アップロード・クロップ・設定 -->
-        <div class="space-y-4">
-          <!-- アップロード -->
-          <UCard>
-            <template #header>
-              <span class="text-sm font-medium">画像を読み込む</span>
-            </template>
-            <div
-              class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors select-none"
-              :class="
-                isDraggingOver
-                  ? 'border-sky-400 bg-sky-950/30'
-                  : 'border-slate-700 hover:border-slate-500'
-              "
-              @click="fileInputRef?.click()"
-              @dragover.prevent="isDraggingOver = true"
-              @dragleave="isDraggingOver = false"
-              @drop="onDrop"
-            >
-              <div class="text-4xl mb-2">🖼</div>
-              <p class="text-sm text-slate-400">クリックまたはドロップ</p>
-              <p class="text-xs text-slate-600 mt-1">PNG · JPG · WEBP</p>
-            </div>
-            <input
-              ref="fileInputRef"
-              type="file"
-              class="hidden"
-              accept="image/*"
-              @change="onFileChange"
-            />
-          </UCard>
-
-          <!-- クロップ -->
-          <UCard v-if="sourceImg">
-            <template #header>
-              <span class="text-sm font-medium">切り取り範囲</span>
-              <span class="text-xs text-slate-500 ml-2"
-                >コーナーをドラッグで調整</span
-              >
-            </template>
-            <div class="flex justify-center">
-              <canvas
-                ref="cropCanvasRef"
-                class="max-w-full rounded"
-                @mousedown="onMousedown"
-                @mousemove="onMousemove"
-                @mouseup="onMouseup"
-                @mouseleave="onMouseup"
-              />
-            </div>
-          </UCard>
-
-          <!-- 変換設定 -->
-          <UCard v-if="sourceImg">
-            <template #header>
-              <span class="text-sm font-medium">変換設定</span>
-            </template>
-            <div class="space-y-4">
-              <div>
-                <p class="text-xs text-slate-400 mb-2">解像度</p>
-                <div class="flex gap-2">
-                  <UButton
-                    v-for="size in [64, 128, 256]"
-                    :key="size"
-                    :variant="targetSize === size ? 'solid' : 'outline'"
-                    size="sm"
-                    @click="targetSize = size as 64 | 128 | 256"
-                  >
-                    {{ size }}×{{ size }}
-                  </UButton>
-                </div>
-              </div>
-              <UButton class="w-full" @click="onConvert"> 変換する </UButton>
-            </div>
-          </UCard>
+    <!-- ヘッダー -->
+    <header
+      class="sticky top-0 z-30"
+      style="
+        background: rgba(255, 246, 225, 0.92);
+        border-bottom: 2.5px solid #2a1f1b;
+        backdrop-filter: blur(8px);
+      "
+    >
+      <div class="max-w-[1152px] mx-auto px-6 py-3 flex items-center gap-3">
+        <div
+          class="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+          style="
+            background: #ffd66b;
+            border: 2.5px solid #2a1f1b;
+            box-shadow: 0 3px 0 0 #2a1f1b;
+          "
+        >
+          <span style="font-size: 22px">👾</span>
         </div>
-
-        <!-- 右カラム: ドット絵・カラーパレット -->
-        <div class="space-y-4">
-          <!-- ドット絵プレビュー -->
-          <UCard v-if="resultImageData">
-            <template #header>
-              <div class="flex items-center justify-between flex-wrap gap-2">
-                <div class="flex items-center gap-3">
-                  <span class="text-sm font-medium">ドット絵プレビュー</span>
-                  <span
-                    v-if="hoveredPixel"
-                    class="text-xs font-mono text-slate-400"
-                  >
-                    ({{ hoveredPixel.x }}, {{ hoveredPixel.y }})
-                    <span
-                      class="inline-block w-3 h-3 rounded-sm align-middle mx-1 border border-white/20"
-                      :style="{ backgroundColor: hoveredPixel.hex }"
-                    />
-                    {{ hoveredPixel.hex.toUpperCase() }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-slate-500">ズーム</span>
-                  <div class="flex gap-1">
-                    <UButton
-                      v-for="z in zoomOptions"
-                      :key="z"
-                      :variant="zoomLevel === z ? 'solid' : 'ghost'"
-                      size="xs"
-                      @click="zoomLevel = z"
-                    >
-                      {{ z }}x
-                    </UButton>
-                  </div>
-                  <UButton
-                    size="xs"
-                    variant="ghost"
-                    icon="i-heroicons-arrow-down-tray"
-                    @click="onDownload"
-                  >
-                    保存
-                  </UButton>
-                </div>
-              </div>
-            </template>
-            <div class="overflow-auto" style="max-height: 540px">
-              <canvas
-                ref="pixelGridCanvasRef"
-                style="image-rendering: pixelated"
-                @mousemove="onPixelHover"
-                @mouseleave="hoveredPixel = null"
-              />
-            </div>
-          </UCard>
-
-          <!-- カラーパレット -->
-          <UCard v-if="colorPalette.length > 0">
-            <template #header>
-              <span class="text-sm font-medium">カラーパレット</span>
-              <span class="text-xs text-slate-500 ml-2"
-                >{{ colorPalette.length }}色</span
-              >
-            </template>
-            <div class="space-y-1 max-h-80 overflow-y-auto pr-1">
-              <div
-                v-for="entry in colorPalette.slice(0, 200)"
-                :key="entry.hex"
-                class="flex items-center gap-2 text-xs group cursor-pointer hover:bg-slate-800/50 rounded px-1 py-0.5 transition-colors"
-                :title="`クリックでコピー: ${entry.hex.toUpperCase()}`"
-                @click="onCopyHex(entry.hex)"
-              >
-                <div
-                  class="w-5 h-5 rounded shrink-0 border border-white/10"
-                  :style="{ backgroundColor: entry.hex }"
-                />
-                <code class="font-mono text-slate-300 w-20 shrink-0">
-                  {{ entry.hex.toUpperCase() }}
-                </code>
-                <div
-                  class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"
-                >
-                  <div
-                    class="h-full rounded-full"
-                    :style="{
-                      width: `${(entry.count / (colorPalette[0]?.count ?? 1)) * 100}%`,
-                      backgroundColor: entry.hex,
-                    }"
-                  />
-                </div>
-                <span class="text-slate-500 w-12 text-right shrink-0">
-                  {{ entry.percentage.toFixed(1) }}%
-                </span>
-              </div>
-            </div>
-          </UCard>
+        <div style="line-height: 1.2">
+          <div
+            class="font-extrabold tracking-tight"
+            style="font-size: 16px; color: #2a1f1b"
+          >
+            Tomodachi Hair Trace
+          </div>
+          <div class="mono" style="font-size: 10px; color: #7a6a5f">
+            しゃしん → ドット絵 へんかんツール · v0.5
+          </div>
+        </div>
+        <div class="ml-auto hidden sm:flex items-center gap-2">
+          <span class="chip" style="background: #beebd3">
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              style="background: #5fc290; display: inline-block"
+            />
+            READY
+          </span>
         </div>
       </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main
+      class="max-w-[1152px] mx-auto px-6 py-8"
+      style="position: relative; z-index: 1"
+    >
+      <!-- ヒーローストリップ -->
+      <div class="mb-6 flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1
+            class="font-extrabold"
+            style="
+              font-size: clamp(24px, 4vw, 36px);
+              color: #2a1f1b;
+              line-height: 1.2;
+            "
+          >
+            しゃしんを
+            <span
+              class="inline-block -rotate-2 px-2 py-0.5 rounded-xl"
+              style="
+                background: #ff7a5c;
+                color: #fff;
+                border: 2.5px solid #2a1f1b;
+                box-shadow: 0 3px 0 0 #2a1f1b;
+              "
+            >
+              ドット絵
+            </span>
+            に
+          </h1>
+          <p class="mt-2" style="font-size: 15px; color: #4a3a33">
+            3 ステップで、おともだちの顔をかわいいピクセルアートに変換します。
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="chip" style="background: #ffe7a3">① アップロード</span>
+          <span class="chip" style="background: #beebd3">② きりとり</span>
+          <span class="chip" style="background: #ffc8d6">③ へんかん</span>
+        </div>
+      </div>
+
+      <!-- 2カラムグリッド -->
+      <div
+        class="grid gap-6"
+        style="grid-template-columns: 1fr; align-items: start"
+      >
+        <div
+          class="grid gap-6"
+          style="
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            align-items: start;
+            min-width: 0;
+          "
+        >
+          <!-- 左カラム: アップロード・クロップ・設定 -->
+          <div class="space-y-5" style="max-width: 420px">
+            <ImageUpload @loaded="onImageLoaded" @reset="onReset" />
+            <CropCanvas
+              v-if="sourceImg"
+              ref="cropCanvasRef"
+              :image="sourceImg"
+            />
+            <ConvertSettings v-if="sourceImg" @convert="onConvert" />
+          </div>
+
+          <!-- 右カラム: ドット絵・カラーパレット -->
+          <div class="space-y-5" style="min-width: 0">
+            <template v-if="resultImageData">
+              <PixelGridPreview :image-data="resultImageData" />
+              <ColorPalette
+                v-if="colorPalette.length > 0"
+                :palette="colorPalette"
+                @copied="onHexCopied"
+              />
+            </template>
+
+            <!-- エンプティステート -->
+            <div
+              v-else
+              class="card flex flex-col items-center justify-center text-center p-8 relative overflow-hidden"
+              style="min-height: 460px"
+            >
+              <div
+                class="absolute inset-0"
+                style="
+                  background-image: radial-gradient(
+                    circle at 1px 1px,
+                    rgba(42, 31, 27, 0.08) 1px,
+                    transparent 0
+                  );
+                  background-size: 20px 20px;
+                  z-index: 0;
+                "
+              />
+              <div
+                class="relative flex flex-col items-center"
+                style="z-index: 1"
+              >
+                <div
+                  class="bounce-tiny w-20 h-20 rounded-full flex items-center justify-center mb-4"
+                  style="
+                    background: #ffd66b;
+                    border: 2.5px solid #2a1f1b;
+                    box-shadow: 0 4px 0 0 #2a1f1b;
+                  "
+                >
+                  <span style="font-size: 40px">👾</span>
+                </div>
+                <div class="font-bold" style="font-size: 18px; color: #2a1f1b">
+                  {{
+                    sourceImg
+                      ? "「へんかん する！」をおして"
+                      : "まずはしゃしんをえらんでね"
+                  }}
+                </div>
+                <div class="mt-1" style="font-size: 14px; color: #7a6a5f">
+                  {{
+                    sourceImg
+                      ? "ドット絵に へんしんします ✨"
+                      : "おともだちのかおをドット絵にするよ"
+                  }}
+                </div>
+                <div
+                  class="mt-6 grid grid-cols-3 gap-3 w-full"
+                  style="max-width: 360px"
+                >
+                  <div
+                    v-for="step in [
+                      {
+                        n: 1,
+                        label: 'アップロード',
+                        emoji: '📷',
+                        bg: '#ffe7a3',
+                      },
+                      { n: 2, label: 'きりとり', emoji: '✂️', bg: '#beebd3' },
+                      { n: 3, label: 'へんかん', emoji: '✨', bg: '#ffc8d6' },
+                    ]"
+                    :key="step.n"
+                    class="card flex flex-col items-center py-3 px-2"
+                    style="border-radius: 18px; box-shadow: 0 4px 0 0 #2a1f1b"
+                    :style="{ background: step.bg }"
+                  >
+                    <div
+                      style="
+                        font-size: 24px;
+                        line-height: 1;
+                        margin-bottom: 4px;
+                      "
+                    >
+                      {{ step.emoji }}
+                    </div>
+                    <div
+                      class="mono font-bold"
+                      style="font-size: 10px; color: #4a3a33"
+                    >
+                      STEP {{ step.n }}
+                    </div>
+                    <div
+                      class="font-bold"
+                      style="font-size: 12px; color: #2a1f1b"
+                    >
+                      {{ step.label }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- フッター -->
+      <footer
+        class="mt-12 mb-4 flex items-center justify-between mono"
+        style="font-size: 10px; color: #7a6a5f"
+      >
+        <div>👾 Tomodachi Hair Trace · pixel art studio</div>
+        <div>built with &lt;canvas&gt; · fully local, no upload</div>
+      </footer>
     </main>
+
+    <!-- トースト通知 -->
+    <Transition name="toast-fade">
+      <div
+        v-if="toastMsg"
+        class="toast fixed z-50 left-1/2 -translate-x-1/2"
+        style="bottom: 32px"
+      >
+        <div
+          class="flex items-center gap-2 font-bold rounded-full px-4 py-2"
+          style="
+            background: #fff;
+            color: #2a1f1b;
+            border: 2.5px solid #2a1f1b;
+            box-shadow: 0 4px 0 0 #2a1f1b;
+            font-size: 14px;
+          "
+        >
+          <span
+            class="w-2 h-2 rounded-full shrink-0"
+            style="background: #5fc290; display: inline-block"
+          />
+          {{ toastMsg }}
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
