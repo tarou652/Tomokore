@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { useImageCrop } from "~/composables/useImageCrop";
-import {
-  extractColorPalette,
-  type PaletteEntry,
-} from "~/composables/useColorPalette";
+import { extractColorPalette, type PaletteEntry } from "~/composables/useColorPalette";
+import { pixelSnap } from "~/composables/usePixelSnap";
 
 const cropCanvasRef = ref<HTMLCanvasElement | null>(null);
 const pixelGridCanvasRef = ref<HTMLCanvasElement | null>(null);
@@ -11,18 +9,20 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const sourceImg = ref<HTMLImageElement | null>(null);
 const isDraggingOver = ref(false);
-const targetSize = ref<64 | 128 | 256>(64);
+const targetSize = ref<32 | 64 | 128 | 256>(64);
 const resultImageData = ref<ImageData | null>(null);
 const colorPalette = ref<PaletteEntry[]>([]);
 const zoomLevel = ref(4);
 const hoveredPixel = ref<{ x: number; y: number; hex: string } | null>(null);
+const snapColorCount = ref(16);
+const isSnapped = ref(false);
 
 const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
   useImageCrop(cropCanvasRef);
 
-// デフォルトズームを解像度に合わせる
+const defaultZoom: Record<number, number> = { 32: 8, 64: 4, 128: 2, 256: 1 };
 watch(targetSize, (size) => {
-  zoomLevel.value = size === 64 ? 4 : size === 128 ? 2 : 1;
+  zoomLevel.value = defaultZoom[size] ?? 1;
 });
 
 function loadImage(file: File) {
@@ -34,6 +34,7 @@ function loadImage(file: File) {
     resultImageData.value = null;
     colorPalette.value = [];
     hoveredPixel.value = null;
+    isSnapped.value = false;
     nextTick(() => setImage(img));
   };
   img.src = url;
@@ -84,27 +85,19 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
     }
   }
 
-  // グリッド線
   if (zoom >= 2) {
     ctx.strokeStyle = "rgba(255,255,255,0.07)";
     ctx.lineWidth = 0.5;
     for (let xi = 0; xi <= width; xi++) {
       const px = mLeft + xi * zoom + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(px, mTop);
-      ctx.lineTo(px, mTop + height * zoom);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px, mTop); ctx.lineTo(px, mTop + height * zoom); ctx.stroke();
     }
     for (let yi = 0; yi <= height; yi++) {
       const py = mTop + yi * zoom + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(mLeft, py);
-      ctx.lineTo(mLeft + width * zoom, py);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mLeft, py); ctx.lineTo(mLeft + width * zoom, py); ctx.stroke();
     }
   }
 
-  // 座標ラベル
   if (showLabels) {
     const step = zoom >= 16 ? 1 : zoom >= 8 ? 2 : 4;
     ctx.fillStyle = "#64748b";
@@ -122,20 +115,30 @@ function renderPixelGrid(imageData: ImageData, zoom: number) {
   }
 }
 
-function onConvert() {
-  const out = getCroppedCanvas(targetSize.value);
-  if (!out) return;
-  const ctx = out.getContext("2d")!;
-  const imageData = ctx.getImageData(0, 0, targetSize.value, targetSize.value);
+function applyAndRender(imageData: ImageData) {
   resultImageData.value = imageData;
   colorPalette.value = extractColorPalette(imageData);
   nextTick(() => renderPixelGrid(imageData, zoomLevel.value));
 }
 
+function onConvert() {
+  const out = getCroppedCanvas(targetSize.value);
+  if (!out) return;
+  const ctx = out.getContext("2d")!;
+  const imageData = ctx.getImageData(0, 0, targetSize.value, targetSize.value);
+  isSnapped.value = false;
+  applyAndRender(imageData);
+}
+
+function onPixelSnap() {
+  if (!resultImageData.value) return;
+  const snapped = pixelSnap(resultImageData.value, snapColorCount.value);
+  isSnapped.value = true;
+  applyAndRender(snapped);
+}
+
 watch(zoomLevel, (z) => {
-  if (resultImageData.value) {
-    nextTick(() => renderPixelGrid(resultImageData.value!, z));
-  }
+  if (resultImageData.value) nextTick(() => renderPixelGrid(resultImageData.value!, z));
 });
 
 function onPixelHover(e: MouseEvent) {
@@ -150,17 +153,10 @@ function onPixelHover(e: MouseEvent) {
   const pxX = Math.floor((mx - mLeft) / zoomLevel.value);
   const pxY = Math.floor((my - mTop) / zoomLevel.value);
   const size = targetSize.value;
-  if (pxX < 0 || pxY < 0 || pxX >= size || pxY >= size) {
-    hoveredPixel.value = null;
-    return;
-  }
+  if (pxX < 0 || pxY < 0 || pxX >= size || pxY >= size) { hoveredPixel.value = null; return; }
   const { data } = resultImageData.value;
   const i = (pxY * size + pxX) * 4;
-  hoveredPixel.value = {
-    x: pxX,
-    y: pxY,
-    hex: toHex(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0),
-  };
+  hoveredPixel.value = { x: pxX, y: pxY, hex: toHex(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0) };
 }
 
 async function onCopyHex(hex: string) {
@@ -177,6 +173,7 @@ function onDownload() {
 }
 
 const zoomOptions = [1, 2, 4, 8, 16] as const;
+const sizeOptions = [32, 64, 128, 256] as const;
 </script>
 
 <template>
@@ -188,7 +185,7 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
 
     <main class="container mx-auto p-4 lg:p-6 max-w-6xl">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- 左カラム: アップロード・クロップ・設定 -->
+        <!-- 左カラム -->
         <div class="space-y-4">
           <!-- アップロード -->
           <UCard>
@@ -197,11 +194,7 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
             </template>
             <div
               class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors select-none"
-              :class="
-                isDraggingOver
-                  ? 'border-sky-400 bg-sky-950/30'
-                  : 'border-slate-700 hover:border-slate-500'
-              "
+              :class="isDraggingOver ? 'border-sky-400 bg-sky-950/30' : 'border-slate-700 hover:border-slate-500'"
               @click="fileInputRef?.click()"
               @dragover.prevent="isDraggingOver = true"
               @dragleave="isDraggingOver = false"
@@ -211,22 +204,14 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
               <p class="text-sm text-slate-400">クリックまたはドロップ</p>
               <p class="text-xs text-slate-600 mt-1">PNG · JPG · WEBP</p>
             </div>
-            <input
-              ref="fileInputRef"
-              type="file"
-              class="hidden"
-              accept="image/*"
-              @change="onFileChange"
-            />
+            <input ref="fileInputRef" type="file" class="hidden" accept="image/*" @change="onFileChange" />
           </UCard>
 
           <!-- クロップ -->
           <UCard v-if="sourceImg">
             <template #header>
               <span class="text-sm font-medium">切り取り範囲</span>
-              <span class="text-xs text-slate-500 ml-2"
-                >コーナーをドラッグで調整</span
-              >
+              <span class="text-xs text-slate-500 ml-2">コーナーをドラッグで調整</span>
             </template>
             <div class="flex justify-center">
               <canvas
@@ -246,26 +231,60 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
               <span class="text-sm font-medium">変換設定</span>
             </template>
             <div class="space-y-4">
+              <!-- 解像度 -->
               <div>
                 <p class="text-xs text-slate-400 mb-2">解像度</p>
                 <div class="flex gap-2">
                   <UButton
-                    v-for="size in [64, 128, 256]"
+                    v-for="size in sizeOptions"
                     :key="size"
                     :variant="targetSize === size ? 'solid' : 'outline'"
                     size="sm"
-                    @click="targetSize = size as 64 | 128 | 256"
+                    @click="targetSize = size"
                   >
                     {{ size }}×{{ size }}
                   </UButton>
                 </div>
               </div>
-              <UButton class="w-full" @click="onConvert"> 変換する </UButton>
+              <UButton class="w-full" @click="onConvert">変換する</UButton>
+            </div>
+          </UCard>
+
+          <!-- Pixel Snap -->
+          <UCard v-if="resultImageData">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="text-sm font-medium">Pixel Snap</span>
+                <span v-if="isSnapped" class="text-xs text-green-400">適用済み</span>
+              </div>
+            </template>
+            <div class="space-y-4">
+              <div>
+                <div class="flex justify-between mb-2">
+                  <p class="text-xs text-slate-400">色数上限</p>
+                  <span class="text-xs font-mono text-slate-300">{{ snapColorCount }}色</span>
+                </div>
+                <input
+                  v-model.number="snapColorCount"
+                  type="range"
+                  min="4"
+                  max="32"
+                  step="2"
+                  class="w-full accent-sky-400"
+                />
+                <div class="flex justify-between text-xs text-slate-600 mt-1">
+                  <span>4色</span>
+                  <span>32色</span>
+                </div>
+              </div>
+              <UButton class="w-full" variant="outline" @click="onPixelSnap">
+                Pixel Snap を適用
+              </UButton>
             </div>
           </UCard>
         </div>
 
-        <!-- 右カラム: ドット絵・カラーパレット -->
+        <!-- 右カラム -->
         <div class="space-y-4">
           <!-- ドット絵プレビュー -->
           <UCard v-if="resultImageData">
@@ -273,10 +292,7 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
               <div class="flex items-center justify-between flex-wrap gap-2">
                 <div class="flex items-center gap-3">
                   <span class="text-sm font-medium">ドット絵プレビュー</span>
-                  <span
-                    v-if="hoveredPixel"
-                    class="text-xs font-mono text-slate-400"
-                  >
+                  <span v-if="hoveredPixel" class="text-xs font-mono text-slate-400">
                     ({{ hoveredPixel.x }}, {{ hoveredPixel.y }})
                     <span
                       class="inline-block w-3 h-3 rounded-sm align-middle mx-1 border border-white/20"
@@ -298,12 +314,7 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
                       {{ z }}x
                     </UButton>
                   </div>
-                  <UButton
-                    size="xs"
-                    variant="ghost"
-                    icon="i-heroicons-arrow-down-tray"
-                    @click="onDownload"
-                  >
+                  <UButton size="xs" variant="ghost" icon="i-heroicons-arrow-down-tray" @click="onDownload">
                     保存
                   </UButton>
                 </div>
@@ -323,28 +334,19 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
           <UCard v-if="colorPalette.length > 0">
             <template #header>
               <span class="text-sm font-medium">カラーパレット</span>
-              <span class="text-xs text-slate-500 ml-2"
-                >{{ colorPalette.length }}色</span
-              >
+              <span class="text-xs text-slate-500 ml-2">{{ colorPalette.length }}色</span>
             </template>
             <div class="space-y-1 max-h-80 overflow-y-auto pr-1">
               <div
                 v-for="entry in colorPalette.slice(0, 200)"
                 :key="entry.hex"
-                class="flex items-center gap-2 text-xs group cursor-pointer hover:bg-slate-800/50 rounded px-1 py-0.5 transition-colors"
+                class="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-800/50 rounded px-1 py-0.5 transition-colors"
                 :title="`クリックでコピー: ${entry.hex.toUpperCase()}`"
                 @click="onCopyHex(entry.hex)"
               >
-                <div
-                  class="w-5 h-5 rounded shrink-0 border border-white/10"
-                  :style="{ backgroundColor: entry.hex }"
-                />
-                <code class="font-mono text-slate-300 w-20 shrink-0">
-                  {{ entry.hex.toUpperCase() }}
-                </code>
-                <div
-                  class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"
-                >
+                <div class="w-5 h-5 rounded shrink-0 border border-white/10" :style="{ backgroundColor: entry.hex }" />
+                <code class="font-mono text-slate-300 w-20 shrink-0">{{ entry.hex.toUpperCase() }}</code>
+                <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                   <div
                     class="h-full rounded-full"
                     :style="{
@@ -353,9 +355,7 @@ const zoomOptions = [1, 2, 4, 8, 16] as const;
                     }"
                   />
                 </div>
-                <span class="text-slate-500 w-12 text-right shrink-0">
-                  {{ entry.percentage.toFixed(1) }}%
-                </span>
+                <span class="text-slate-500 w-12 text-right shrink-0">{{ entry.percentage.toFixed(1) }}%</span>
               </div>
             </div>
           </UCard>

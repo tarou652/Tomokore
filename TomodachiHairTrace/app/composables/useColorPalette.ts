@@ -20,12 +20,14 @@ export function extractColorPalette(imageData: ImageData): PaletteEntry[] {
   const total = width * height;
 
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 128) continue;
-    const hex = toHex(data[i], data[i + 1], data[i + 2]);
+    if ((data[i + 3] ?? 0) < 128) continue;
+    const r = data[i] ?? 0;
+    const g = data[i + 1] ?? 0;
+    const b = data[i + 2] ?? 0;
+    const hex = toHex(r, g, b);
     const entry = counts.get(hex);
     if (entry) entry.count++;
-    else
-      counts.set(hex, { r: data[i], g: data[i + 1], b: data[i + 2], count: 1 });
+    else counts.set(hex, { r, g, b, count: 1 });
   }
 
   const entries: PaletteEntry[] = [];
