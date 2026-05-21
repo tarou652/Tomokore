@@ -10,15 +10,28 @@ const RESOLUTION_OPTS: { size: Resolution; label: string; emoji: string }[] = [
   { size: 256, label: "こまかめ", emoji: "🔍" },
 ];
 
+/** 色数の最小・最大値 */
+const COLOR_COUNT_MIN = 8;
+const COLOR_COUNT_MAX = 16;
+/** 色数のデフォルト値 */
+const COLOR_COUNT_DEFAULT = 12;
+
 const emit = defineEmits<{
-  convert: [size: Resolution];
+  convert: [size: Resolution, colorCount: number | null];
 }>();
 
 const targetSize = ref<Resolution>(128);
+const colorCount = ref(COLOR_COUNT_DEFAULT);
+/** 色数制限を有効にするかどうか */
+const useColorLimit = ref(true);
 
-/** 現在選択中の解像度で変換イベントをemitする */
+/** 現在の設定で変換イベントをemitする */
 function onConvert() {
-  emit("convert", targetSize.value);
+  emit(
+    "convert",
+    targetSize.value,
+    useColorLimit.value ? colorCount.value : null,
+  );
 }
 </script>
 
@@ -69,6 +82,56 @@ function onConvert() {
             <span style="font-size: 9px; color: #4a3a33">{{ opt.label }}</span>
           </button>
         </div>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <p
+            class="font-bold uppercase tracking-wider"
+            style="font-size: 11px; color: #4a3a33"
+          >
+            いろすう
+            <span v-if="useColorLimit" class="mono" style="color: #ff7a5c">
+              {{ colorCount }}色
+            </span>
+            <span v-else class="mono" style="color: #7a6a5f">なし</span>
+          </p>
+          <label
+            class="flex items-center gap-1.5 cursor-pointer"
+            style="font-size: 11px; color: #4a3a33"
+          >
+            <input
+              v-model="useColorLimit"
+              type="checkbox"
+              style="
+                accent-color: #ff7a5c;
+                cursor: pointer;
+                width: 14px;
+                height: 14px;
+              "
+            />
+            <span class="font-bold">しぼる</span>
+          </label>
+        </div>
+        <div v-if="useColorLimit" class="flex items-center gap-2">
+          <span class="mono" style="font-size: 10px; color: #7a6a5f">
+            {{ COLOR_COUNT_MIN }}
+          </span>
+          <input
+            v-model.number="colorCount"
+            type="range"
+            :min="COLOR_COUNT_MIN"
+            :max="COLOR_COUNT_MAX"
+            step="1"
+            class="flex-1"
+            style="accent-color: #ff7a5c; cursor: pointer"
+          />
+          <span class="mono" style="font-size: 10px; color: #7a6a5f">
+            {{ COLOR_COUNT_MAX }}
+          </span>
+        </div>
+        <p v-else style="font-size: 11px; color: #7a6a5f">
+          元の色をそのまま使います
+        </p>
       </div>
       <button class="btn btn-primary btn-lg w-full" @click="onConvert">
         ✦ へんかん する！

@@ -166,14 +166,8 @@ Tomodachi Hair Trace
 
 ## 技術候補
 
-### 初期版
-
-- MediaPipe
-- OpenCV
-
-### 高精度版
-
-- TensorFlow.js segmentation
+- TensorFlow.js（ブラウザ内推論）
+- Transformers.js（Hugging Face モデル）
 
 ---
 
@@ -336,47 +330,18 @@ Tomodachi Hair Trace
 
 # 11. AI / 画像解析
 
-## TensorFlow.js
+## TensorFlow.js / Transformers.js
 
 ### 用途
 
-- 髪領域抽出
-- 輪郭検出補助
-- セグメンテーション
-- 特徴抽出
+- 画像からドット絵スタイルへの変換
+- 色量子化補助
 
 ### 使用理由
 
 - ブラウザ上で推論可能
 - GPUアクセラレーション利用可能
 - ローカル動作可能
-
----
-
-## MediaPipe
-
-### 用途
-
-- 顔検出
-- 顔ランドマーク取得
-- 顔領域位置合わせ
-
-### 使用理由
-
-- 軽量
-- 精度が高い
-- ブラウザ対応が強い
-
----
-
-## OpenCV.js
-
-### 用途
-
-- 輪郭抽出
-- ノイズ除去
-- 線単純化
-- 二値化
 
 ---
 
@@ -416,15 +381,12 @@ Nuxt 4
 ├─ UI
 ├─ Canvas Editor
 ├─ Image Upload
-├─ TensorFlow.js
-│   ├─ 髪抽出
-│   └─ 特徴解析
-├─ MediaPipe
-│   └─ 顔ランドマーク
-└─ OpenCV.js
-    ├─ 線画化
-    ├─ 輪郭抽出
-    └─ 簡略化
+├─ TF.js / Transformers.js
+│   └─ ドット絵AI変換
+└─ Pixel Snapper（独自実装）
+    ├─ グリッドスナップ
+    ├─ 色量子化（8〜16色）
+    └─ アンチエイリアス除去
 ```
 
 ---
@@ -436,29 +398,28 @@ Nuxt 4
 ### まず作る
 
 - 画像アップロード
-- MediaPipe顔検出
-- Canvas描画
+- クロップ・リサイズ
+- 色量子化（8〜16色）
 - PNG出力
 
 ---
 
 ## Phase 2
 
-### 髪変換
+### Pixel Snapper
 
-- 輪郭抽出
-- 前髪検出
-- シルエット最適化
+- グリッドスナップ
+- アンチエイリアス除去
+- 手動微調整エディタ
 
 ---
 
 ## Phase 3
 
-### 高精度化
+### AI変換
 
-- TensorFlow segmentation
-- AI簡略化
-- 描画順生成
+- TF.js / Transformers.js によるドット絵変換
+- Pixel Snapper との統合
 
 ---
 

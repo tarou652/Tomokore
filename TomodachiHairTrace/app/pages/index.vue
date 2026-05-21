@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import CropCanvas from "~/components/CropCanvas.vue";
 import {
-  quantizeColors,
-  type PaletteEntry,
-} from "~/composables/useColorPalette";
+  snapToPixelArt,
+  type PixelSnapResult,
+} from "~/composables/usePixelSnapper";
+import type { PaletteEntry } from "~/composables/useColorPalette";
+import { useBackgroundRemoval } from "~/composables/useBackgroundRemoval";
 
-/** カラーパレットの最大色数 */
-const MAX_PALETTE_COLORS = 12;
 /** トーストの表示時間（ms） */
 const TOAST_DURATION = 1500;
 
@@ -15,6 +15,8 @@ const sourceImg = ref<HTMLImageElement | null>(null);
 const resultImageData = ref<ImageData | null>(null);
 const colorPalette = ref<PaletteEntry[]>([]);
 const toastMsg = ref<string | null>(null);
+
+const { removeBg, isRemoving, removeError } = useBackgroundRemoval();
 
 /** 画像をリセットして全状態をクリアする */
 function onReset() {
@@ -38,15 +40,36 @@ function onImageLoaded(img: HTMLImageElement) {
   colorPalette.value = [];
 }
 
-/** クロップ範囲をダウンサンプリングしてドット絵とカラーパレットを生成する */
-function onConvert(size: 64 | 128 | 256) {
+/** クロップ範囲を処理してドット絵とカラーパレットを生成する */
+function onConvert(size: 64 | 128 | 256, colorCount: number | null) {
   const out = cropCanvasRef.value?.getCroppedCanvas(size);
   if (!out) return;
   const ctx = out.getContext("2d")!;
-  const imageData = ctx.getImageData(0, 0, size, size);
+  const raw = ctx.getImageData(0, 0, size, size);
+  if (colorCount === null) {
+    resultImageData.value = raw;
+    colorPalette.value = [];
+    showToast(`変換完了 · ${size}×${size} · 色数制限なし`);
+    return;
+  }
+  const { imageData, palette }: PixelSnapResult = snapToPixelArt(
+    raw,
+    colorCount,
+  );
   resultImageData.value = imageData;
-  colorPalette.value = quantizeColors(imageData, MAX_PALETTE_COLORS);
-  showToast(`変換完了 · ${size}×${size} · ${colorPalette.value.length}色`);
+  colorPalette.value = palette;
+  showToast(`変換完了 · ${size}×${size} · ${palette.length}色`);
+}
+
+/** 背景を削除してsourceImgを更新する */
+async function onRemoveBg() {
+  if (!sourceImg.value) return;
+  try {
+    sourceImg.value = await removeBg(sourceImg.value);
+    showToast("背景を削除しました");
+  } catch {
+    showToast(removeError.value ?? "背景削除に失敗しました");
+  }
 }
 
 /** カラーパレットからHEXコードをコピーしたときのフィードバックを表示する */
@@ -209,6 +232,43 @@ function onHexCopied(hex: string) {
           <!-- 左カラム: アップロード・クロップ・設定 -->
           <div class="space-y-5" style="max-width: 420px">
             <ImageUpload @loaded="onImageLoaded" @reset="onReset" />
+            <div v-if="sourceImg" class="card p-4 space-y-3">
+              <div class="flex items-center gap-2">
+                <div
+                  class="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0"
+                  style="
+                    border: 2px solid #2a1f1b;
+                    box-shadow: 0 2px 0 0 #2a1f1b;
+                  "
+                >
+                  <span style="font-size: 14px">✂️</span>
+                </div>
+                <div>
+                  <p
+                    class="font-bold"
+                    style="font-size: 14px; color: #2a1f1b; line-height: 1.2"
+                  >
+                    はいけいさくじょ
+                  </p>
+                  <p style="font-size: 11px; color: #4a3a33; margin-top: 2px">
+                    AIが背景を自動で取り除きます（初回のみDL）
+                  </p>
+                </div>
+              </div>
+              <button
+                class="btn btn-lg w-full"
+                :disabled="isRemoving"
+                style="
+                  background: #c4e3f7;
+                  border: 2.5px solid #2a1f1b;
+                  box-shadow: 0 3px 0 0 #2a1f1b;
+                "
+                @click="onRemoveBg"
+              >
+                <span v-if="isRemoving">⏳ しょりちゅう…</span>
+                <span v-else>✂️ はいけいをけす</span>
+              </button>
+            </div>
             <CropCanvas
               v-if="sourceImg"
               ref="cropCanvasRef"
