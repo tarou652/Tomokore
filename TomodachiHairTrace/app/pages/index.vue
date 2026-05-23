@@ -6,6 +6,16 @@ import {
 } from "~/composables/usePixelSnapper";
 import type { PaletteEntry } from "~/composables/useColorPalette";
 import { useBackgroundRemoval } from "~/composables/useBackgroundRemoval";
+import {
+  applyColorAdjust,
+  type ColorAdjustParams,
+} from "~/composables/useColorAdjust";
+import { matchToTomodachiPalette } from "~/composables/useTomodachiPalette";
+import {
+  paletteEntriesToRecipe,
+  imageDataToRecipe,
+  type ColorRecipeEntry,
+} from "~/composables/useColorRecipe";
 
 /** トーストの表示時間（ms） */
 const TOAST_DURATION = 1500;
@@ -14,15 +24,25 @@ const cropCanvasRef = ref<InstanceType<typeof CropCanvas> | null>(null);
 const sourceImg = ref<HTMLImageElement | null>(null);
 const resultImageData = ref<ImageData | null>(null);
 const colorPalette = ref<PaletteEntry[]>([]);
+const recipeEntries = ref<ColorRecipeEntry[]>([]);
 const toastMsg = ref<string | null>(null);
+/** プレビューと編集モードの切り替えフラグ */
+const isEditing = ref(false);
 
 const { removeBg, isRemoving, removeError } = useBackgroundRemoval();
+
+/** エディタで使用するパレット（レシピまたは量子化パレット） */
+const editorPalette = computed(() =>
+  recipeEntries.value.length > 0 ? recipeEntries.value : colorPalette.value,
+);
 
 /** 画像をリセットして全状態をクリアする */
 function onReset() {
   sourceImg.value = null;
   resultImageData.value = null;
   colorPalette.value = [];
+  recipeEntries.value = [];
+  isEditing.value = false;
 }
 
 /** トーストを一定時間表示する */
@@ -38,27 +58,50 @@ function onImageLoaded(img: HTMLImageElement) {
   sourceImg.value = img;
   resultImageData.value = null;
   colorPalette.value = [];
+  recipeEntries.value = [];
+  isEditing.value = false;
 }
 
 /** クロップ範囲を処理してドット絵とカラーパレットを生成する */
-function onConvert(size: 64 | 128 | 256, colorCount: number | null) {
+function onConvert(
+  size: 64 | 128 | 256,
+  colorCount: number | null,
+  adjustParams: ColorAdjustParams,
+  useTomodachiPalette: boolean,
+) {
   const out = cropCanvasRef.value?.getCroppedCanvas(size);
   if (!out) return;
   const ctx = out.getContext("2d")!;
-  const raw = ctx.getImageData(0, 0, size, size);
-  if (colorCount === null) {
-    resultImageData.value = raw;
+  // 出力キャンバスの実サイズを使う（アスペクト比維持のため非正方形になる場合がある）
+  const raw = ctx.getImageData(0, 0, out.width, out.height);
+  // 色調整を変換前に適用する
+  const adjusted = applyColorAdjust(raw, adjustParams);
+  const sizeLabel = `${out.width}×${out.height}`;
+  isEditing.value = false;
+  // 84色トモコレパレットモード
+  if (useTomodachiPalette) {
+    resultImageData.value = matchToTomodachiPalette(adjusted);
     colorPalette.value = [];
-    showToast(`変換完了 · ${size}×${size} · 色数制限なし`);
+    recipeEntries.value = imageDataToRecipe(resultImageData.value);
+    showToast(`変換完了 · ${sizeLabel} · 🎮 84色パレット`);
+    return;
+  }
+  if (colorCount === null) {
+    resultImageData.value = adjusted;
+    colorPalette.value = [];
+    // 色数制限なしは色が多すぎるためレシピを生成しない
+    recipeEntries.value = [];
+    showToast(`変換完了 · ${sizeLabel} · 色数制限なし`);
     return;
   }
   const { imageData, palette }: PixelSnapResult = snapToPixelArt(
-    raw,
+    adjusted,
     colorCount,
   );
   resultImageData.value = imageData;
   colorPalette.value = palette;
-  showToast(`変換完了 · ${size}×${size} · ${palette.length}色`);
+  recipeEntries.value = paletteEntriesToRecipe(palette);
+  showToast(`変換完了 · ${sizeLabel} · ${palette.length}色`);
 }
 
 /** 背景を削除してsourceImgを更新する */
@@ -69,6 +112,15 @@ async function onRemoveBg() {
     showToast("背景を削除しました");
   } catch {
     showToast(removeError.value ?? "背景削除に失敗しました");
+  }
+}
+
+/** エディタで編集されたとき resultImageData を更新する */
+function onEditorUpdate(imageData: ImageData) {
+  resultImageData.value = imageData;
+  // 編集後もレシピを最新に保つ
+  if (recipeEntries.value.length > 0) {
+    recipeEntries.value = imageDataToRecipe(imageData);
   }
 }
 
@@ -280,12 +332,47 @@ function onHexCopied(hex: string) {
           <!-- 右カラム: ドット絵・カラーパレット -->
           <div class="space-y-5" style="min-width: 0">
             <template v-if="resultImageData">
-              <PixelGridPreview :image-data="resultImageData" />
-              <ColorPalette
-                v-if="colorPalette.length > 0"
-                :palette="colorPalette"
-                @copied="onHexCopied"
+              <!-- プレビュー/編集モード切り替えタブ -->
+              <div class="flex gap-1.5">
+                <button
+                  class="btn py-1 px-3"
+                  :class="{ 'btn-active': !isEditing }"
+                  style="font-size: 11px"
+                  @click="isEditing = false"
+                >
+                  👁 プレビュー
+                </button>
+                <button
+                  class="btn py-1 px-3"
+                  :class="{ 'btn-active': isEditing }"
+                  style="font-size: 11px"
+                  @click="isEditing = true"
+                >
+                  ✏️ 編集
+                </button>
+              </div>
+
+              <!-- 編集モード -->
+              <PixelEditor
+                v-if="isEditing"
+                :image-data="resultImageData"
+                :palette="editorPalette"
+                @update="onEditorUpdate"
               />
+
+              <!-- プレビューモード -->
+              <template v-else>
+                <PixelGridPreview :image-data="resultImageData" />
+                <ColorPalette
+                  v-if="colorPalette.length > 0"
+                  :palette="colorPalette"
+                  @copied="onHexCopied"
+                />
+                <PaletteRecipe
+                  v-if="recipeEntries.length > 0"
+                  :entries="recipeEntries"
+                />
+              </template>
             </template>
 
             <!-- エンプティステート -->

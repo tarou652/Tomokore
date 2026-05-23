@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ref } from "vue";
-import { useImageCrop } from "../useImageCrop";
+import { useImageCrop, ASPECT_PRESETS } from "../useImageCrop";
 
 /** テスト用のキャンバスモックを生成するヘルパー */
 function makeCanvasMock() {
@@ -89,12 +89,34 @@ describe("useImageCrop", () => {
     setImage(img);
     expect(cropRect.value.x).toBeGreaterThanOrEqual(0);
     expect(cropRect.value.y).toBeGreaterThanOrEqual(0);
-    expect(cropRect.value.x + cropRect.value.size).toBeLessThanOrEqual(
+    expect(cropRect.value.x + cropRect.value.w).toBeLessThanOrEqual(
       canvas.width,
     );
-    expect(cropRect.value.y + cropRect.value.size).toBeLessThanOrEqual(
+    expect(cropRect.value.y + cropRect.value.h).toBeLessThanOrEqual(
       canvas.height,
     );
+  });
+
+  it("デフォルト（1:1）の cropRect は正方形になる", () => {
+    const { setImage, cropRect } = useImageCrop(canvasRef);
+    setImage(makeImageMock(200, 200));
+    expect(cropRect.value.w).toBe(cropRect.value.h);
+  });
+
+  it("setAspectRatio(2,3) 後の cropRect が 2:3 のアスペクト比を維持する", () => {
+    const { setImage, setAspectRatio, cropRect } = useImageCrop(canvasRef);
+    setImage(makeImageMock(200, 200));
+    setAspectRatio(2, 3);
+    const ratio = cropRect.value.w / cropRect.value.h;
+    expect(ratio).toBeCloseTo(2 / 3, 1);
+  });
+
+  it("setAspectRatio(16,9) 後の cropRect が 16:9 のアスペクト比を維持する", () => {
+    const { setImage, setAspectRatio, cropRect } = useImageCrop(canvasRef);
+    setImage(makeImageMock(200, 200));
+    setAspectRatio(16, 9);
+    const ratio = cropRect.value.w / cropRect.value.h;
+    expect(ratio).toBeCloseTo(16 / 9, 1);
   });
 
   it("getCroppedCanvas は画像未設定時に null を返す", () => {
@@ -102,7 +124,7 @@ describe("useImageCrop", () => {
     expect(getCroppedCanvas(64)).toBeNull();
   });
 
-  it("getCroppedCanvas は指定サイズのキャンバスを返す", () => {
+  it("getCroppedCanvas は 1:1 画像で長辺 = targetSize の正方形キャンバスを返す", () => {
     const { setImage, getCroppedCanvas } = useImageCrop(canvasRef);
     setImage(makeImageMock(100, 100));
 
@@ -116,6 +138,32 @@ describe("useImageCrop", () => {
     expect(result).not.toBeNull();
     expect(outCanvas.width).toBe(64);
     expect(outCanvas.height).toBe(64);
+  });
+
+  it("getCroppedCanvas は 2:3 アスペクト比でも long side = targetSize になる", () => {
+    const { setImage, setAspectRatio, getCroppedCanvas } =
+      useImageCrop(canvasRef);
+    setImage(makeImageMock(200, 200));
+    setAspectRatio(2, 3);
+
+    const outCanvas = makeCanvasMock().canvas;
+    vi.spyOn(document, "createElement").mockReturnValueOnce(
+      outCanvas as unknown as HTMLElement,
+    );
+
+    getCroppedCanvas(128);
+    // 縦 > 横 なので height = 128、width = 128 * (2/3) ≈ 85
+    expect(outCanvas.height).toBe(128);
+    expect(outCanvas.width).toBeCloseTo(85, 0);
+  });
+
+  it("ASPECT_PRESETS に 4 件のプリセットが定義されている", () => {
+    expect(ASPECT_PRESETS).toHaveLength(4);
+  });
+
+  it("ASPECT_PRESETS の最初のプリセットが 1:1 の正方形である", () => {
+    const first = ASPECT_PRESETS[0]!;
+    expect(first.wRatio / first.hRatio).toBe(1);
   });
 
   it("onMouseup がドラッグを終了する（例外なく完了する）", () => {

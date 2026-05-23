@@ -19,22 +19,58 @@ const BORDER_WIDTH = 1.5;
 export interface CropRect {
   x: number;
   y: number;
-  size: number;
+  w: number;
+  h: number;
 }
 
+export interface AspectPreset {
+  id: string;
+  label: string;
+  emoji: string;
+  wRatio: number;
+  hRatio: number;
+}
+
+/** トモコレの描画エリアに対応するアスペクト比プリセット一覧 */
+export const ASPECT_PRESETS: AspectPreset[] = [
+  { id: "square", label: "顔", emoji: "🧑", wRatio: 1, hRatio: 1 },
+  { id: "portrait", label: "たてなが", emoji: "📖", wRatio: 2, hRatio: 3 },
+  { id: "landscape", label: "よこなが", emoji: "📺", wRatio: 16, hRatio: 9 },
+  { id: "game", label: "ゲーム", emoji: "🎮", wRatio: 3, hRatio: 2 },
+];
+
 export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
-  const cropRect = ref<CropRect>({ x: 0, y: 0, size: 0 });
+  const cropRect = ref<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
   const displayScale = ref(1);
+  const aspectRatio = ref<{ w: number; h: number }>({ w: 1, h: 1 });
 
   let imgEl: HTMLImageElement | null = null;
   let dragMode: "move" | "tl" | "tr" | "bl" | "br" | null = null;
   let dragStartX = 0;
   let dragStartY = 0;
-  let startRect: CropRect = { x: 0, y: 0, size: 0 };
+  let startRect: CropRect = { x: 0, y: 0, w: 0, h: 0 };
 
   /** canvas の 2D コンテキストを取得する */
   function getCtx() {
     return canvasRef.value?.getContext("2d") ?? null;
+  }
+
+  /** アスペクト比を維持しながらキャンバス内に収まる最大クロップ枠を中央配置する */
+  function initCropRect(cw: number, ch: number) {
+    const { w: rw, h: rh } = aspectRatio.value;
+    let cropW = cw;
+    let cropH = (cw * rh) / rw;
+    // 高さがキャンバスを超える場合は高さ基準で再計算
+    if (cropH > ch) {
+      cropH = ch;
+      cropW = (ch * rw) / rh;
+    }
+    cropRect.value = {
+      x: Math.round((cw - cropW) / 2),
+      y: Math.round((ch - cropH) / 2),
+      w: Math.round(cropW),
+      h: Math.round(cropH),
+    };
   }
 
   /** 画像をキャンバスにセットしてクロップ枠を初期化する */
@@ -51,12 +87,16 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     displayScale.value = scale;
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
-    const minDim = Math.min(canvas.width, canvas.height);
-    cropRect.value = {
-      x: Math.round((canvas.width - minDim) / 2),
-      y: Math.round((canvas.height - minDim) / 2),
-      size: minDim,
-    };
+    initCropRect(canvas.width, canvas.height);
+    draw();
+  }
+
+  /** アスペクト比を変更してクロップ枠を再初期化する */
+  function setAspectRatio(wRatio: number, hRatio: number) {
+    aspectRatio.value = { w: wRatio, h: hRatio };
+    const canvas = canvasRef.value;
+    if (!canvas || !imgEl) return;
+    initCropRect(canvas.width, canvas.height);
     draw();
   }
 
@@ -65,7 +105,7 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     const ctx = getCtx();
     const canvas = canvasRef.value;
     if (!ctx || !canvas || !imgEl) return;
-    const { x, y, size } = cropRect.value;
+    const { x, y, w, h } = cropRect.value;
 
     ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
 
@@ -76,20 +116,20 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     // 選択範囲だけ元の画像を再描画してクリアに見せる
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x, y, size, size);
+    ctx.rect(x, y, w, h);
     ctx.clip();
     ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
     ctx.restore();
 
     ctx.strokeStyle = BORDER_COLOR;
     ctx.lineWidth = BORDER_WIDTH;
-    ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
     const corners = [
       { hx: x, hy: y },
-      { hx: x + size, hy: y },
-      { hx: x, hy: y + size },
-      { hx: x + size, hy: y + size },
+      { hx: x + w, hy: y },
+      { hx: x, hy: y + h },
+      { hx: x + w, hy: y + h },
     ];
     for (const c of corners) {
       ctx.beginPath();
@@ -114,12 +154,12 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
 
   /** 座標がコーナーハンドルに当たっているか判定してIDを返す */
   function hitHandle(mx: number, my: number) {
-    const { x, y, size } = cropRect.value;
+    const { x, y, w, h } = cropRect.value;
     const corners = [
       { id: "tl" as const, hx: x, hy: y },
-      { id: "tr" as const, hx: x + size, hy: y },
-      { id: "bl" as const, hx: x, hy: y + size },
-      { id: "br" as const, hx: x + size, hy: y + size },
+      { id: "tr" as const, hx: x + w, hy: y },
+      { id: "bl" as const, hx: x, hy: y + h },
+      { id: "br" as const, hx: x + w, hy: y + h },
     ];
     for (const c of corners) {
       if (Math.hypot(mx - c.hx, my - c.hy) <= HANDLE_R) return c.id;
@@ -134,8 +174,8 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     if (handle) {
       dragMode = handle;
     } else {
-      const { x, y, size } = cropRect.value;
-      if (mx >= x && mx <= x + size && my >= y && my <= y + size) {
+      const { x, y, w, h } = cropRect.value;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
         dragMode = "move";
       } else {
         return;
@@ -147,7 +187,19 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     e.preventDefault();
   }
 
-  /** ドラッグ中にクロップ枠を更新して再描画する */
+  /** アスペクト比を維持しながら幅から高さを計算する */
+  function heightFromWidth(w: number): number {
+    const { w: rw, h: rh } = aspectRatio.value;
+    return (w * rh) / rw;
+  }
+
+  /** アスペクト比を維持しながら高さから幅を計算する */
+  function widthFromHeight(h: number): number {
+    const { w: rw, h: rh } = aspectRatio.value;
+    return (h * rw) / rh;
+  }
+
+  /** ドラッグ中にクロップ枠をアスペクト比を維持しながら更新して再描画する */
   function onMousemove(e: MouseEvent) {
     const canvas = canvasRef.value;
     if (!canvas) return;
@@ -160,9 +212,9 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
         canvas.style.cursor =
           handle === "tl" || handle === "br" ? "nwse-resize" : "nesw-resize";
       } else {
-        const { x, y, size } = cropRect.value;
+        const { x, y, w, h } = cropRect.value;
         canvas.style.cursor =
-          mx >= x && mx <= x + size && my >= y && my <= y + size
+          mx >= x && mx <= x + w && my >= y && my <= y + h
             ? "move"
             : "crosshair";
       }
@@ -171,37 +223,69 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
 
     const cw = canvas.width;
     const ch = canvas.height;
-    const { x, y, size } = startRect;
-    let nx = x;
-    let ny = y;
-    let nsize = size;
+    const { x, y, w, h } = startRect;
+    let nx = x,
+      ny = y,
+      nw = w,
+      nh = h;
 
     if (dragMode === "move") {
-      nx = Math.max(0, Math.min(cw - size, x + (mx - dragStartX)));
-      ny = Math.max(0, Math.min(ch - size, y + (my - dragStartY)));
+      nx = Math.max(0, Math.min(cw - w, x + (mx - dragStartX)));
+      ny = Math.max(0, Math.min(ch - h, y + (my - dragStartY)));
     } else if (dragMode === "br") {
-      nsize = Math.max(MIN_CROP_SIZE, Math.max(mx - x, my - y));
-      nsize = Math.min(nsize, cw - x, ch - y);
-      nx = x;
-      ny = y;
+      // 右下コーナー: 左上固定・幅優先でアスペクト比を維持
+      nw = Math.max(MIN_CROP_SIZE, mx - x);
+      nw = Math.min(nw, cw - x);
+      nh = heightFromWidth(nw);
+      if (ny + nh > ch) {
+        nh = ch - ny;
+        nw = widthFromHeight(nh);
+      }
     } else if (dragMode === "tl") {
-      nsize = Math.max(MIN_CROP_SIZE, Math.max(x + size - mx, y + size - my));
-      nsize = Math.min(nsize, x + size, y + size);
-      nx = x + size - nsize;
-      ny = y + size - nsize;
+      // 左上コーナー: 右下固定
+      const fixX = x + w;
+      const fixY = y + h;
+      nw = Math.max(MIN_CROP_SIZE, fixX - mx);
+      nw = Math.min(nw, fixX);
+      nh = heightFromWidth(nw);
+      if (nh > fixY) {
+        nh = fixY;
+        nw = widthFromHeight(nh);
+      }
+      nx = fixX - nw;
+      ny = fixY - nh;
     } else if (dragMode === "tr") {
-      nsize = Math.max(MIN_CROP_SIZE, Math.max(mx - x, y + size - my));
-      nsize = Math.min(nsize, cw - x, y + size);
+      // 右上コーナー: 左下固定
+      const fixY = y + h;
+      nw = Math.max(MIN_CROP_SIZE, mx - x);
+      nw = Math.min(nw, cw - x);
+      nh = heightFromWidth(nw);
+      if (nh > fixY) {
+        nh = fixY;
+        nw = widthFromHeight(nh);
+      }
       nx = x;
-      ny = y + size - nsize;
+      ny = fixY - nh;
     } else if (dragMode === "bl") {
-      nsize = Math.max(MIN_CROP_SIZE, Math.max(x + size - mx, my - y));
-      nsize = Math.min(nsize, x + size, ch - y);
-      nx = x + size - nsize;
+      // 左下コーナー: 右上固定
+      const fixX = x + w;
+      nw = Math.max(MIN_CROP_SIZE, fixX - mx);
+      nw = Math.min(nw, fixX);
+      nh = heightFromWidth(nw);
+      if (ny + nh > ch) {
+        nh = ch - ny;
+        nw = widthFromHeight(nh);
+      }
+      nx = fixX - nw;
       ny = y;
     }
 
-    cropRect.value = { x: nx, y: ny, size: nsize };
+    cropRect.value = {
+      x: Math.round(nx),
+      y: Math.round(ny),
+      w: Math.round(nw),
+      h: Math.round(nh),
+    };
     draw();
   }
 
@@ -210,14 +294,17 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
     dragMode = null;
   }
 
-  /** クロップ範囲を targetSize px の正方形キャンバスに書き出す */
+  /** クロップ範囲をアスペクト比を維持して書き出す（長辺が targetSize になる） */
   function getCroppedCanvas(targetSize: number): HTMLCanvasElement | null {
     if (!imgEl) return null;
     const scale = displayScale.value;
-    const { x, y, size } = cropRect.value;
+    const { x, y, w, h } = cropRect.value;
+    // 長辺を targetSize に合わせ、短辺はアスペクト比から計算する
+    const outW = w >= h ? targetSize : Math.round((targetSize * w) / h);
+    const outH = h > w ? targetSize : Math.round((targetSize * h) / w);
     const out = document.createElement("canvas");
-    out.width = targetSize;
-    out.height = targetSize;
+    out.width = outW;
+    out.height = outH;
     const ctx = out.getContext("2d")!;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
@@ -225,12 +312,12 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
       imgEl,
       x / scale,
       y / scale,
-      size / scale,
-      size / scale,
+      w / scale,
+      h / scale,
       0,
       0,
-      targetSize,
-      targetSize,
+      outW,
+      outH,
     );
     return out;
   }
@@ -238,6 +325,7 @@ export function useImageCrop(canvasRef: Ref<HTMLCanvasElement | null>) {
   return {
     cropRect: readonly(cropRect),
     setImage,
+    setAspectRatio,
     draw,
     onMousedown,
     onMousemove,

@@ -38,8 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd c:/code/tomokore && STATUS=$(git status --short 2>/dev/null); if [ -n \"$STATUS\" ]; then echo ''; echo '╔══════════════════════════════════════╗'; echo '║  📝 未コミットの変更があります        ║'; echo '╚══════════════════════════════════════╝'; echo ''; git status --short; echo ''; echo 'コミットしますか？ → git add / git commit'; echo ''; fi",
-            "statusMessage": "変更チェック中..."
+            "command": "node c:/code/tomokore/.claude/hooks/stop-check.js",
+            "statusMessage": "変更・メモリを確認中..."
           }
         ]
       }

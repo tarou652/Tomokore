@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useImageCrop } from "~/composables/useImageCrop";
+import { useImageCrop, type AspectPreset } from "~/composables/useImageCrop";
 
 const props = defineProps<{
   image: HTMLImageElement;
@@ -7,8 +7,14 @@ const props = defineProps<{
 
 const cropCanvasRef = ref<HTMLCanvasElement | null>(null);
 
-const { setImage, onMousedown, onMousemove, onMouseup, getCroppedCanvas } =
-  useImageCrop(cropCanvasRef);
+const {
+  setImage,
+  setAspectRatio,
+  onMousedown,
+  onMousemove,
+  onMouseup,
+  getCroppedCanvas,
+} = useImageCrop(cropCanvasRef);
 
 /** image prop が更新されたらクロップ枠を再初期化する */
 watch(
@@ -16,6 +22,11 @@ watch(
   (img) => nextTick(() => setImage(img)),
   { immediate: true },
 );
+
+/** プリセット変更時にアスペクト比を反映する */
+function onPresetSelect(preset: AspectPreset) {
+  setAspectRatio(preset.wRatio, preset.hRatio);
+}
 
 defineExpose({ getCroppedCanvas });
 </script>
@@ -38,11 +49,14 @@ defineExpose({ getCroppedCanvas });
             きりとり
           </h2>
           <p style="font-size: 11px; color: #4a3a33; margin-top: 2px">
-            コーナーをひっぱって調整
+            よう途を選んでコーナーをひっぱって調整
           </p>
         </div>
       </div>
     </header>
+    <div class="px-4 pt-3">
+      <CropPresets @select="onPresetSelect" />
+    </div>
     <div class="p-4 flex justify-center">
       <canvas
         ref="cropCanvasRef"
